@@ -1,0 +1,53 @@
+# Environment variables
+.env
+*.env
+!.env.example
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+coverage/
+.pytest_cache/
+.coverage
+
+# Kiro specs (optional - keep if you want version control)
+.kiro/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# API specific
+api/dist/
+api/node_modules/
+
+# AI Service specific
+ai-service/__pycache__/
+ai-service/*.pyc

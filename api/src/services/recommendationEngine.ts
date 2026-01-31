@@ -1,0 +1,251 @@
+import { sqlFilterEngine, SQLFilterEngine } from './sqlFilterEngine';
+import { embeddingManager, EmbeddingManager } from './embeddingManager';
+import { aiServiceClient } from './aiServiceClient';
+import { getSupabaseClient } from '../config/supabase';
+import logger from '../utils/logger';
+
+interface UserContext {
+  geography?: string;
+  organization_name?: string;
+  job_title?: string;
+  org_type?: string;
+  org_size?: string;
+  nomination_subject?: string;
+  description?: string;
+  achievement_focus?: string[];
+  tech_orientation?: string;
+  operating_scope?: string;
+}
+
+interface Recommendation {
+  category_id: string;
+  category_name: string;
+  description: string;
+  program_name: string;
+  program_code: string;
+  similarity_score: number;
+  match_reasons?: string[];
+  geographic_scope: string[];
+  applicable_org_types: string[];
+  applicable_org_sizes: string[];
+  nomination_subject_type: string;
+  achievement_focus: string[];
+}
+
+/**
+ * Recommendation Engine orchestrates the complete recommendation pipeline:
+ * 1. SQL filtering by eligibility criteria
+ * 2. Embedding generation for user query
+ * 3. Similarity search using pgvector
+ * 4. Optional match explanation generation
+ */
+export class RecommendationEngine {
+  private sqlFilter: SQLFilterEngine;
+  private embeddingMgr: EmbeddingManager;
+
+  constructor(
+    sqlFilter?: SQLFilterEngine,
+    embeddingMgr?: EmbeddingManager
+  ) {
+    this.sqlFilter = sqlFilter || sqlFilterEngine;
+    this.embeddingMgr = embeddingMgr || embeddingManager;
+  }
+
+  /**
+   * Validate that UserContext has all required fields for recommendations.
+   */
+  private validateContextCompleteness(context: UserContext): boolean {
+    const requiredFields = [
+      'org_type',
+      'org_size',
+      'nomination_subject',
+      'description',
+      'achievement_focus',
+    ];
+
+    for (const field of requiredFields) {
+      const value = context[field as keyof UserContext];
+      if (value === undefined || value === null) {
+        logger.warn('incomplete_context', { missing_field: field });
+        return false;
+      }
+
+      // Check achievement_focus is non-empty array
+      if (field === 'achievement_focus' && Array.isArray(value) && value.length === 0) {
+        logger.warn('incomplete_context', { missing_field: 'achievement_focus (empty)' });
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Generate recommendations for a user based on their context.
+   * 
+   * Pipeline:
+   * 1. Validate context completeness
+   * 2. Filter categories by eligibility (SQL)
+   * 3. Generate user embedding
+   * 4. Perform similarity search
+   * 5. Optionally enrich with explanations
+   */
+  async generateRecommendations(
+    context: UserContext,
+    options: {
+      limit?: number;
+      includeExplanations?: boolean;
+    } = {}
+  ): Promise<Recommendation[]> {
+    const { limit = 10, includeExplanations = false } = options;
+
+    logger.info('generating_recommendations', {
+      geography: context.geography,
+      org_type: context.org_type,
+      org_size: context.org_size,
+      nomination_subject: context.nomination_subject,
+      limit: limit,
+      include_explanations: includeExplanations,
+    });
+
+    try {
+      // Step 1: Validate context completeness
+      if (!this.validateContextCompleteness(context)) {
+        throw new Error('UserContext is incomplete. Cannot generate recommendations.');
+      }
+
+      // Step 2: No client-side filtering - filtering happens in database
+      logger.info('step_1_database_filtering', {
+        geography: context.geography || 'all',
+        note: 'Filtering by geography in database function',
+      });
+
+      // Step 3: Generate user embedding
+      logger.info('step_2_generating_user_embedding');
+      const userEmbedding = await this.embeddingMgr.generateUserEmbedding(context);
+
+      logger.info('user_embedding_generated', {
+        dimension: userEmbedding.length,
+      });
+
+      // Step 4: Perform similarity search with geography filter
+      logger.info('step_3_similarity_search');
+      const similarityResults = await this.embeddingMgr.performSimilaritySearch(
+        userEmbedding,
+        context.geography, // Pass geography for database-side filtering
+        limit
+      );
+
+      logger.info('similarity_search_complete', {
+        results_count: similarityResults.length,
+      });
+
+      // Step 5: Format recommendations
+      let recommendations: Recommendation[] = similarityResults.map((result) => ({
+        category_id: result.category_id,
+        category_name: result.category_name,
+        description: result.description,
+        program_name: result.program_name,
+        program_code: result.program_code,
+        similarity_score: result.similarity_score,
+        geographic_scope: result.geographic_scope,
+        applicable_org_types: result.applicable_org_types,
+        applicable_org_sizes: result.applicable_org_sizes,
+        nomination_subject_type: result.nomination_subject_type,
+        achievement_focus: result.achievement_focus,
+      }));
+
+      // Step 6: Optionally enrich with explanations
+      if (includeExplanations && recommendations.length > 0) {
+        logger.info('step_4_generating_explanations');
+        try {
+          const explanationsResponse = await aiServiceClient.generateExplanations(
+            context,
+            recommendations.map((rec) => ({
+              category_id: rec.category_id,
+              category_name: rec.category_name,
+              description: rec.description,
+              program_name: rec.program_name,
+            }))
+          );
+
+          // Merge explanations into recommendations
+          const explanationsMap = new Map(
+            explanationsResponse.explanations.map((exp) => [
+              exp.category_id,
+              exp.match_reasons,
+            ])
+          );
+
+          recommendations = recommendations.map((rec) => ({
+            ...rec,
+            match_reasons: explanationsMap.get(rec.category_id) || [],
+          }));
+
+          logger.info('explanations_added', {
+            count: explanationsResponse.explanations.length,
+          });
+        } catch (error: any) {
+          // Don't fail the entire recommendation if explanations fail
+          logger.error('explanation_generation_failed', {
+            error: error.message,
+          });
+        }
+      }
+
+      logger.info('recommendations_generated', {
+        total_recommendations: recommendations.length,
+      });
+
+      return recommendations;
+    } catch (error: any) {
+      logger.error('recommendation_generation_error', {
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get recommendation statistics for monitoring.
+   */
+  async getRecommendationStats(context: UserContext): Promise<{
+    eligible_categories: number;
+    total_categories: number;
+    filter_rate: number;
+  }> {
+    try {
+      // Get total categories
+      const supabase = getSupabaseClient();
+      const { count: totalCount } = await supabase
+        .from('stevie_categories')
+        .select('*', { count: 'exact', head: true });
+
+      // Get eligible categories
+      const filteredCategories = await this.sqlFilter.filterCategories({
+        geography: context.geography,
+        org_type: context.org_type,
+        org_size: context.org_size,
+        nomination_subject: context.nomination_subject,
+        achievement_focus: context.achievement_focus,
+      });
+
+      const eligibleCount = filteredCategories.length;
+      const filterRate = totalCount ? (eligibleCount / totalCount) * 100 : 0;
+
+      return {
+        eligible_categories: eligibleCount,
+        total_categories: totalCount || 0,
+        filter_rate: Math.round(filterRate * 100) / 100,
+      };
+    } catch (error: any) {
+      logger.error('stats_generation_error', {
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+}
+
+// Export singleton instance
+export const recommendationEngine = new RecommendationEngine();
