@@ -4,8 +4,8 @@ services:
     name: stevie-api
     env: node
     region: oregon
-    plan: starter
-    buildCommand: cd api && npm install && npm run build
+    plan: free
+    buildCommand: cd api && npm install --include=dev && npm run build
     startCommand: cd api && node dist/index.js
     envVars:
       - key: NODE_ENV
@@ -34,7 +34,7 @@ services:
     name: stevie-ai-service
     env: python
     region: oregon
-    plan: starter
+    plan: free
     buildCommand: cd ai-service && pip install -r requirements.txt
     startCommand: cd ai-service && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
