@@ -2,7 +2,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Try multiple paths for .env file
+// Try multiple paths for .env file (for local development)
 const possibleEnvPaths = [
   path.resolve(process.cwd(), '.env'),           // Current directory
   path.resolve(__dirname, '..', '.env'),         // api/.env
@@ -21,17 +21,21 @@ for (const envPath of possibleEnvPaths) {
   }
 }
 
-if (!envLoaded) {
-  console.error('Error: Could not find .env file in any expected location');
+// In production (Render), environment variables are set via dashboard, not .env file
+if (!envLoaded && process.env.NODE_ENV !== 'production') {
+  console.error('Warning: Could not find .env file in any expected location');
   console.error('Tried paths:', possibleEnvPaths);
-  process.exit(1);
+  console.error('Make sure environment variables are set via your hosting platform');
 }
 
 console.log('Environment check:', {
+  NODE_ENV: process.env.NODE_ENV || 'development',
   SUPABASE_URL: process.env.SUPABASE_URL ? 'Set' : 'Missing',
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ? 'Set' : 'Missing',
   INTERNAL_API_KEY: process.env.INTERNAL_API_KEY ? 'Set' : 'Missing',
+  AI_SERVICE_URL: process.env.AI_SERVICE_URL ? 'Set' : 'Missing',
 });
+
 
 // Now import everything else
 import express from 'express';
