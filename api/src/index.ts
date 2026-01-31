@@ -48,7 +48,6 @@ import { correlationIdMiddleware } from './middleware/correlationId';
 import { requestLoggerMiddleware } from './middleware/requestLogger';
 import { errorHandlerMiddleware } from './middleware/errorHandler';
 import { globalRateLimiter } from './middleware/rateLimiter';
-import { conversationOrchestrator } from './services/conversationOrchestrator';
 import healthRouter from './routes/health';
 import metricsRouter from './routes/metrics';
 import usersRouter from './routes/users';
@@ -124,30 +123,6 @@ app.use('/api/health', healthRouter);
 app.use('/metrics', metricsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/conversation', conversationRouter);
-
-// Test endpoint (for development/testing only)
-app.post('/api/test/conversation', async (req, res) => {
-  try {
-    const { message } = req.body;
-    
-    // Create a test user ID
-    const testUserId = 'test-user-' + Date.now();
-    
-    // Start conversation
-    const result = await conversationOrchestrator.startConversation(testUserId);
-    
-    res.json({
-      success: true,
-      userId: testUserId,
-      ...result
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // Root endpoint
 app.get('/', (_req, res) => {
