@@ -94,46 +94,56 @@ class OpenAIClient:
         retry=retry_if_exception_type(OpenAIError),
         reraise=True
     )
-    async def create_embedding(self, text: str) -> list[float]:
+    async def create_embedding(self, text: str, model: str = None) -> dict:
         """
         Generate embedding vector for text using OpenAI API.
         
         Args:
             text: Text to embed
+            model: Optional model override (defaults to settings.openai_embedding_model)
             
         Returns:
-            list[float]: Embedding vector (1536 dimensions for text-embedding-3-small)
+            dict: {
+                "embedding": list[float],  # Embedding vector (1536 dimensions for text-embedding-3-small)
+                "tokens_used": int         # Number of tokens used
+            }
             
         Raises:
             OpenAIError: If API call fails after retries
         """
+        embedding_model = model or self.embedding_model
+        
         try:
             logger.info(
                 "openai_embedding_request",
-                model=self.embedding_model,
+                model=embedding_model,
                 text_length=len(text)
             )
             
             response = self.client.embeddings.create(
-                model=self.embedding_model,
+                model=embedding_model,
                 input=text
             )
             
             embedding = response.data[0].embedding
+            tokens_used = response.usage.total_tokens
             
             logger.info(
                 "openai_embedding_success",
                 dimension=len(embedding),
-                tokens_used=response.usage.total_tokens
+                tokens_used=tokens_used
             )
             
-            return embedding
+            return {
+                "embedding": embedding,
+                "tokens_used": tokens_used
+            }
             
         except OpenAIError as e:
             logger.error(
                 "openai_embedding_error",
                 error=str(e),
-                model=self.embedding_model
+                model=embedding_model
             )
             raise
 

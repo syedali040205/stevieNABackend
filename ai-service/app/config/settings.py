@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     class Config:
-        env_file = "../.env"  # Load from root .env file
+        env_file = ".env"  # Load from ai-service/.env file
         case_sensitive = False
         extra = "ignore"  # Ignore extra fields from .env
 

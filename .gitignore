@@ -36,8 +36,10 @@ coverage/
 .pytest_cache/
 .coverage
 
-# Kiro specs (optional - keep if you want version control)
+# Kiro specs and documentation
 .kiro/
+*.md
+!README.md
 
 # Temporary files
 *.tmp

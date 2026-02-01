@@ -45,17 +45,11 @@ interface SimilarityResult {
  */
 export class EmbeddingManager {
   private client: SupabaseClient;
-  private openaiApiKey: string;
   private embeddingModel: string;
 
   constructor(client?: SupabaseClient) {
     this.client = client || getSupabaseClient();
-    this.openaiApiKey = process.env.OPENAI_API_KEY || '';
     this.embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
-
-    if (!this.openaiApiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is required');
-    }
   }
 
   /**
@@ -146,7 +140,8 @@ export class EmbeddingManager {
   }
 
   /**
-   * Call OpenAI API to generate embedding for text.
+   * Call Python AI Service to generate embedding for text.
+   * Python handles the OpenAI API call.
    */
   async generateEmbedding(text: string): Promise<number[]> {
     logger.info('generating_embedding', {
@@ -155,26 +150,29 @@ export class EmbeddingManager {
     });
 
     try {
+      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const apiKey = process.env.INTERNAL_API_KEY || '';
+
       const response = await axios.post(
-        'https://api.openai.com/v1/embeddings',
+        `${aiServiceUrl}/api/generate-embedding`,
         {
-          input: text,
+          text: text,
           model: this.embeddingModel,
         },
         {
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.openaiApiKey}`,
+            'X-API-Key': apiKey,
           },
           timeout: 30000,
         }
       );
 
-      const embedding = response.data.data[0].embedding;
+      const embedding = response.data.embedding;
 
       logger.info('embedding_generated', {
         dimension: embedding.length,
-        tokens_used: response.data.usage.total_tokens,
+        tokens_used: response.data.tokens_used || 'unknown',
       });
 
       return embedding;
