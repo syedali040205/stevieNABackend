@@ -52,6 +52,7 @@ import healthRouter from './routes/health';
 import metricsRouter from './routes/metrics';
 import usersRouter from './routes/users';
 import conversationRouter from './routes/conversation';
+import chatbotRouter from './routes/chatbot';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -123,6 +124,7 @@ app.use('/api/health', healthRouter);
 app.use('/metrics', metricsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/conversation', conversationRouter);
+app.use('/api/chatbot', chatbotRouter);
 
 // Root endpoint
 app.get('/', (_req, res) => {

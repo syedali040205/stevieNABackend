@@ -88,6 +88,56 @@ class OpenAIClient:
             )
             raise
     
+    def chat_completion_stream(
+        self,
+        messages: list,
+        temperature: float = 0.7,
+        max_tokens: int = 500
+    ):
+        """
+        Call OpenAI chat completion API with streaming.
+        
+        Args:
+            messages: List of message dictionaries with role and content
+            temperature: Sampling temperature (0-2)
+            max_tokens: Maximum tokens in response
+            
+        Yields:
+            str: Chunks of generated text
+            
+        Raises:
+            OpenAIError: If API call fails
+        """
+        try:
+            logger.info(
+                "openai_chat_stream_request",
+                model=self.model,
+                message_count=len(messages),
+                temperature=temperature
+            )
+            
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True
+            )
+            
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    yield chunk.choices[0].delta.content
+            
+            logger.info("openai_chat_stream_complete")
+            
+        except OpenAIError as e:
+            logger.error(
+                "openai_chat_stream_error",
+                error=str(e),
+                model=self.model
+            )
+            raise
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),

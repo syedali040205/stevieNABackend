@@ -11,7 +11,7 @@
     "lint": "eslint src --ext .ts",
     "chunk-kb": "tsx ../scripts/chunk-kb-content.ts",
     "ingest-kb": "tsx --env-file=.env ingest-kb-data.ts",
-    "test-chatbot-search": "tsx --env-file=.env ../scripts/test-chatbot-search.ts"
+    "test-kb-search": "tsx --env-file=.env test-kb-search.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
