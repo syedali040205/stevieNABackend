@@ -260,10 +260,13 @@ export class ConversationOrchestrator {
           logger.error('recommendation_generation_failed', {
             session_id: sessionId,
             error: error.message,
+            error_stack: error.stack,
+            error_response: error.response?.data,
+            context: extractionResult.updated_context,
           });
 
           return {
-            message: 'Thank you! I have all the information, but encountered an issue generating recommendations. Please try again.',
+            message: `Thank you! I have all the information, but encountered an issue generating recommendations: ${error.message}. Please try again.`,
             question: null,
             conversation_state: 'complete',
             progress: {
