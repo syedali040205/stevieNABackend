@@ -183,6 +183,15 @@ Extracted fields:"""
                 validated_value = self._validate_enum_field(field_name, value)
                 if validated_value:
                     validated_fields[field_name] = validated_value
+            elif field_name == "achievement_focus":
+                # Ensure achievement_focus is always an array
+                if isinstance(value, list):
+                    validated_fields[field_name] = value
+                elif isinstance(value, str):
+                    # Convert comma-separated string to array
+                    validated_fields[field_name] = [v.strip() for v in value.split(",") if v.strip()]
+                else:
+                    validated_fields[field_name] = [str(value)]
             else:
                 validated_fields[field_name] = value
         
@@ -195,6 +204,15 @@ Extracted fields:"""
         # Merge with existing context
         context_dict = context.model_dump(exclude_none=True)
         context_dict.update(validated_fields)
+        
+        # Fallback: If achievement_focus is still missing but we have a description, infer it
+        if "achievement_focus" not in context_dict or not context_dict["achievement_focus"]:
+            if "description" in context_dict and context_dict["description"]:
+                # Infer achievement focus from description
+                inferred_focus = self._infer_achievement_focus(context_dict["description"])
+                if inferred_focus:
+                    context_dict["achievement_focus"] = inferred_focus
+                    logger.info("achievement_focus_inferred", focus=inferred_focus)
         
         # Create updated context
         updated_context = UserContext(**context_dict)
@@ -232,6 +250,64 @@ Extracted fields:"""
                 summary_parts.append(f"{key}: {value}")
         
         return "\n".join(summary_parts) if summary_parts else "No information collected yet."
+    
+    def _infer_achievement_focus(self, description: str) -> list[str]:
+        """
+        Infer achievement focus areas from description text.
+        
+        Args:
+            description: Achievement description
+            
+        Returns:
+            list: Inferred focus areas
+        """
+        description_lower = description.lower()
+        focus_areas = []
+        
+        # Common keywords to focus area mapping
+        keywords_map = {
+            "marketing": ["Marketing", "Brand Management"],
+            "sales": ["Sales"],
+            "customer service": ["Customer Service"],
+            "innovation": ["Innovation"],
+            "technology": ["Technology"],
+            "ai": ["Artificial Intelligence"],
+            "artificial intelligence": ["Artificial Intelligence"],
+            "machine learning": ["Machine Learning"],
+            "digital": ["Digital Transformation"],
+            "leadership": ["Leadership"],
+            "management": ["Management"],
+            "product": ["Product Development"],
+            "software": ["Software Development"],
+            "data": ["Data Analytics"],
+            "analytics": ["Data Analytics"],
+            "cloud": ["Cloud Computing"],
+            "cybersecurity": ["Cybersecurity"],
+            "mobile": ["Mobile Technology"],
+            "web": ["Web Development"],
+            "ecommerce": ["E-commerce"],
+            "social media": ["Social Media"],
+            "content": ["Content Marketing"],
+            "seo": ["SEO"],
+            "advertising": ["Advertising"],
+            "hr": ["Human Resources"],
+            "finance": ["Finance"],
+            "operations": ["Operations"],
+            "supply chain": ["Supply Chain"],
+            "logistics": ["Logistics"],
+            "manufacturing": ["Manufacturing"],
+            "healthcare": ["Healthcare"],
+            "education": ["Education"],
+            "sustainability": ["Sustainability"],
+            "diversity": ["Diversity & Inclusion"],
+        }
+        
+        for keyword, areas in keywords_map.items():
+            if keyword in description_lower:
+                focus_areas.extend(areas)
+        
+        # Remove duplicates and return
+        return list(set(focus_areas)) if focus_areas else ["Business Excellence"]
 
 # Global instance
 field_extractor = FieldExtractor()
