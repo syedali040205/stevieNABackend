@@ -56,13 +56,9 @@ import conversationRouter from './routes/conversation';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS configuration
+// CORS configuration - Allow all origins (use with caution in production)
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || [
-    'https://stevie-nomination-6v8r.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:3001'
-  ],
+  origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-ID'],

@@ -1,0 +1,135 @@
+{
+  "faqs": [
+    {
+      "question": "What are the Stevie Awards?",
+      "answer": "The Stevie Awards are the world's premier business awards. They were created in 2002 to honor and generate public recognition of the achievements and positive contributions of organizations and working professionals worldwide. The Stevie has become one of the world's most coveted prizes. There are 9 Stevie Awards programs, each with its own focus, list of categories, and schedule. Together they attract more than 12,000 nominations each year from organizations in more than 70 nations.",
+      "program": "general",
+      "category": "general",
+      "keywords": [
+        "award",
+        "nomination",
+        "organization"
+      ]
+    },
+    {
+      "question": "How many Stevie Awards programs are there?",
+      "answer": "There are 9 Stevie Awards programs: American Business Awards (ABA), International Business Awards (IBA), Stevie Awards for Sales & Customer Service, Stevie Awards for Women in Business, Stevie Awards for Great Employers, Stevie Awards for Technology Excellence, Asia-Pacific Stevie Awards, Middle East & North Africa Stevie Awards, and German Stevie Awards.",
+      "program": "IBA",
+      "category": "general",
+      "keywords": [
+        "award",
+        "international",
+        "american"
+      ]
+    },
+    {
+      "question": "What is the Stevie Award trophy?",
+      "answer": "The Stevie Award trophy is the prize conferred in all Stevie Awards programs. It is one of the corporate world's most coveted prizes. Winners receive Gold, Silver, or Bronze Stevie Awards based on their scores from the judging process.",
+      "program": "general",
+      "category": "general",
+      "keywords": [
+        "judging",
+        "award",
+        "winner"
+      ]
+    },
+    {
+      "question": "What are the American Business Awards?",
+      "answer": "The American Business Awards are the top honors for achievement in the workplace in the U.S.A. For over 20 years, the ABAs have recognized organizations of all types and sizes—public and private, for-profit and non-profit, large and small—operating in the U.S.A.",
+      "program": "ABA",
+      "category": "general",
+      "keywords": [
+        "award",
+        "organization",
+        "non-profit",
+        "american"
+      ]
+    },
+    {
+      "question": "Who is eligible for the American Business Awards?",
+      "answer": "All U.S.-based organizations are eligible to participate in the American Business Awards.",
+      "program": "ABA",
+      "category": "eligibility",
+      "keywords": [
+        "award",
+        "organization",
+        "american"
+      ]
+    },
+    {
+      "question": "When are the American Business Awards held?",
+      "answer": "The 2026 (24th annual) American Business Awards: Entries now open, Primary entry deadline: February 10, 2026, Final entry deadline: March 4, 2026, Winners notified: April 22, 2026, Public announcement: April 23, 2026, Awards banquet: June 9, 2026 in New York City.",
+      "program": "ABA",
+      "category": "deadlines",
+      "keywords": [
+        "deadline",
+        "award",
+        "winner",
+        "entry",
+        "american"
+      ]
+    },
+    {
+      "question": "What are the main category groups in the American Business Awards?",
+      "answer": "The American Business Awards feature hundreds of categories including: AI Categories (New for 2026), Apps, Events, Publications, Videos, and Website Categories, Achievement Categories, Company/Organization Categories, Communications & Public Relations Categories, Creative Categories (New for 2026), Entrepreneur Categories, Human Resources Categories, Management Categories, Marketing Categories, New Product & Product Management Categories, Social Media Categories, Technology Categories, and Thought Leadership Categories.",
+      "program": "ABA",
+      "category": "categories",
+      "keywords": [
+        "category",
+        "award",
+        "organization",
+        "company",
+        "american"
+      ]
+    },
+    {
+      "question": "What are some new categories in the 2026 American Business Awards?",
+      "answer": "New categories for 2026 include: AI Categories, Creatives Categories, Young Entrepreneurs (Under 35), User-Generated Content, Cybersecurity, E-Commerce, CleanTech, Best Innovation in Management Practices, and Emerging Leader of the Year.",
+      "program": "ABA",
+      "category": "categories",
+      "keywords": [
+        "award",
+        "american"
+      ]
+    },
+    {
+      "question": "What are some past American Business Awards winners?",
+      "answer": "Past winners include major organizations like Amazon, JPMorgan Chase, Bank of America, Verizon, AT&T, Ford Motor Company, Dell, Adobe, Delta Airlines, Salesforce, IBM, Cisco, and many others, alongside small and mid-sized organizations.",
+      "program": "ABA",
+      "category": "general",
+      "keywords": [
+        "award",
+        "winner",
+        "organization",
+        "company",
+        "american"
+      ]
+    },
+    {
+      "question": "What is the People's Choice Stevie Awards for Favorite New Products?",
+      "answer": "This is a public voting component of the American Business Awards where the public can vote for their favorite new products among the finalists.",
+      "program": "ABA",
+      "category": "general",
+      "keywords": [
+        "award",
+        "american"
+      ]
+    }
+  ],
+  "metadata": {
+    "source": "../scripts/stevie-qa-raw.txt",
+    "converted_at": "2026-02-01T10:17:57.410Z",
+    "total_faqs": 10,
+    "programs": [
+      "general",
+      "IBA",
+      "ABA"
+    ],
+    "categories": [
+      "general",
+      "eligibility",
+      "deadlines",
+      "categories"
+    ]
+  }
+}

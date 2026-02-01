@@ -1,0 +1,44 @@
+{
+  "faqs": [
+    {
+      "question": "What are the eligibility requirements for the International Business Awards?",
+      "answer": "The International Business Awards (IBA) is open to organizations worldwide. Any organization, large or small, public or private, for-profit or non-profit, can submit nominations. There are no entry fees for most categories.",
+      "program": "IBA",
+      "category": "eligibility",
+      "keywords": ["eligibility", "requirements", "IBA", "international"],
+      "source_url": "https://stevieawards.com/iba/eligibility"
+    },
+    {
+      "question": "What is the deadline for American Business Awards submissions?",
+      "answer": "The American Business Awards typically has submission deadlines in late spring (May/June). Early-bird deadlines offer discounted entry fees. Check the official website for exact dates as they vary by year.",
+      "program": "ABA",
+      "category": "deadlines",
+      "keywords": ["deadline", "submission", "ABA", "american"],
+      "source_url": "https://stevieawards.com/aba/deadlines"
+    },
+    {
+      "question": "How much does it cost to enter the Stevie Awards?",
+      "answer": "Entry fees vary by program and category. The International Business Awards offers many free categories. The American Business Awards typically charges $350-$450 per entry depending on the deadline. Some categories like Product Awards have different fee structures.",
+      "program": "general",
+      "category": "fees",
+      "keywords": ["cost", "fees", "pricing", "entry"],
+      "source_url": "https://stevieawards.com/fees"
+    },
+    {
+      "question": "What types of organizations can enter the Stevie Awards?",
+      "answer": "All types of organizations can enter: for-profit companies, non-profit organizations, government agencies, and educational institutions. Categories exist for organizations of all sizes, from startups to Fortune 500 companies.",
+      "program": "general",
+      "category": "eligibility",
+      "keywords": ["organization types", "eligibility", "companies"],
+      "source_url": "https://stevieawards.com/eligibility"
+    },
+    {
+      "question": "How are Stevie Awards winners selected?",
+      "answer": "Entries are judged by panels of executives worldwide. Judges score entries on a 0-10 scale across multiple criteria. Gold, Silver, and Bronze Stevie Award winners are determined by average scores. The judging process is blind - judges don't see organization names.",
+      "program": "general",
+      "category": "judging",
+      "keywords": ["judging", "selection", "winners", "process"],
+      "source_url": "https://stevieawards.com/judging"
+    }
+  ]
+}
