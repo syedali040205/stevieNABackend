@@ -176,14 +176,15 @@ Extracted fields:"""
             logger.info(
                 "fields_extracted_raw",
                 extracted_count=len(extracted_fields),
-                fields=list(extracted_fields.keys())
+                fields=list(extracted_fields.keys()),
+                raw_response=response[:200]  # Log first 200 chars of response
             )
             
         except json.JSONDecodeError as e:
-            logger.error("json_parse_error", error=str(e), response=response)
+            logger.error("json_parse_error", error=str(e), response=response[:500])
             extracted_fields = {}
         except Exception as e:
-            logger.error("field_extraction_error", error=str(e))
+            logger.error("field_extraction_error", error=str(e), response_preview=response[:200] if 'response' in locals() else 'no response')
             extracted_fields = {}
         
         # Validate and clean extracted fields

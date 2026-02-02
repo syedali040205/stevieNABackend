@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    openai_model: str = "gpt-5-mini-2025-08-07"  # Using gpt-4o-mini for all chat responses
+    openai_model: str = "gpt-4o-mini"  # Using gpt-4o-mini for all chat responses
     openai_embedding_model: str = "text-embedding-3-small"
     openai_timeout: int = 30
     
