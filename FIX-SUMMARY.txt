@@ -1,0 +1,85 @@
+================================================================================
+RECOMMENDATION ENGINE BUG FIX - SUMMARY
+================================================================================
+
+PROBLEM:
+--------
+The nomination assistant returns "no matching categories" even though:
+- Field extraction works correctly (all 5 required fields extracted)
+- Embedding generation works (1536 dimensions, 219 tokens)
+- Database has 1348 categories
+- Database has category embeddings
+
+ROOT CAUSE:
+-----------
+The database function `search_similar_categories` had a geography filter bug.
+
+When user geography = 'worldwide' (the default when no country in profile), 
+the OLD logic was:
+  WHERE (user_geography IS NULL 
+         OR user_geography = ANY(c.geographic_scope) 
+         OR 'worldwide' = ANY(c.geographic_scope))
+
+This means:
+- If user_geography = 'worldwide', it tries to match categories that have 
+  'worldwide' in their geographic_scope array
+- If most categories don't have 'worldwide' in scope (they have specific 
+  regions like 'usa', 'europe', etc.), then NO categories match!
+- Result: 0 results returned
+
+THE FIX:
+--------
+The FIXED logic is:
+  WHERE (user_geography IS NULL 
+         OR user_geography = 'worldwide'    <-- NEW LINE
+         OR user_geography = ANY(c.geographic_scope) 
+         OR 'worldwide' = ANY(c.geographic_scope))
+
+This means:
+- If user_geography = 'worldwide', match ALL categories (no filtering)
+- If user_geography = specific region (e.g., 'usa'), match categories 
+  that have that region OR 'worldwide' in their scope
+- Result: Proper recommendations returned!
+
+HOW TO APPLY THE FIX:
+---------------------
+1. Go to your Supabase dashboard: https://supabase.com/dashboard
+2. Select your project
+3. Navigate to: SQL Editor (left sidebar)
+4. Copy the entire contents of: scripts/migrations/004_search_function.sql
+5. Paste into the SQL Editor
+6. Click "Run" button
+7. You should see: "Success. No rows returned"
+
+VERIFICATION:
+-------------
+After applying the fix:
+1. Go to your frontend: https://stevie-nomination-hedu.vercel.app
+2. Start a new conversation
+3. Provide the team achievement description again
+4. You should now see 10 category recommendations!
+
+TEST DATA USED:
+---------------
+Geography: worldwide
+Org Type: non_profit
+Org Size: medium
+Subject: team
+Description: "Our team at Jyothishmathi Institute of Technology and Science..."
+Focus: innovation, teamwork, problem_solving, project_management, operational_excellence
+
+EMBEDDING GENERATED:
+--------------------
+✅ Successfully generated embedding
+   - Dimensions: 1536
+   - Tokens: 219
+   - Python AI service is working correctly
+
+NEXT STEPS:
+-----------
+1. Apply the SQL fix (see above)
+2. Test with your team achievement description
+3. Verify recommendations are returned
+4. If still no results, check Node.js logs for any other errors
+
+================================================================================

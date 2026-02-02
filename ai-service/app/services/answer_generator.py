@@ -43,15 +43,15 @@ class AnswerGenerator:
             context_count=len(context_articles)
         )
         
-        if not context_articles:
-            yield "I don't have enough information to answer that question. Could you please rephrase or ask about a specific Stevie Awards program?"
-            return
+        # Check if we have context articles
+        has_context = context_articles and len(context_articles) > 0
         
-        # Build context from articles
-        context_text = self._build_context(context_articles)
-        
-        # Create system prompt
-        system_prompt = """You are a helpful assistant for the Stevie Awards, answering questions about their various awards programs.
+        if has_context:
+            # Build context from articles
+            context_text = self._build_context(context_articles)
+            
+            # Create system prompt for KB-based answers
+            system_prompt = """You are a helpful assistant for the Stevie Awards, answering questions about their various awards programs.
 
 Your role:
 - Answer questions accurately based ONLY on the provided context
@@ -65,18 +65,38 @@ Important guidelines:
 - DO NOT provide outdated information
 - If asked about deadlines or dates, emphasize checking the official website for current information
 - If multiple programs are relevant, mention them all"""
-        
-        # Create user prompt with context
-        user_prompt = f"""Context from Stevie Awards knowledge base:
+            
+            # Create user prompt with context
+            user_prompt = f"""Context from Stevie Awards knowledge base:
 
 {context_text}
 
 Question: {question}
 
 Please provide a helpful answer based on the context above. If the context doesn't contain enough information, say so."""
+        else:
+            # No context available - use general knowledge
+            logger.info("no_context_available_using_general_knowledge")
+            
+            system_prompt = """You are a helpful assistant for the Stevie Awards. When specific information is not available in the knowledge base, you can provide general guidance based on your knowledge.
+
+Your role:
+- Provide helpful, general information about business awards, nominations, and recognition programs
+- Be concise but informative
+- Use a friendly, professional tone
+- When appropriate, suggest checking the official Stevie Awards website for specific details
+
+Important guidelines:
+- Clearly indicate when you're providing general guidance vs. specific Stevie Awards information
+- Encourage users to verify specific details on the official website
+- Be helpful and supportive"""
+            
+            user_prompt = f"""Question: {question}
+
+Note: Specific information about this topic is not available in the knowledge base. Please provide helpful general guidance and suggest checking the official Stevie Awards website for specific details."""
         
         try:
-            # Stream answer using OpenAI
+            # Stream answer using OpenAI with gpt-4o-mini
             for chunk in self.client.chat_completion_stream(
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -87,7 +107,7 @@ Please provide a helpful answer based on the context above. If the context doesn
             ):
                 yield chunk
             
-            logger.info("answer_stream_complete")
+            logger.info("answer_stream_complete", used_context=has_context)
             
         except Exception as e:
             logger.error("answer_stream_error", error=str(e))

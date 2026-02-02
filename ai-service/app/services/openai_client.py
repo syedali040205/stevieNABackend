@@ -92,7 +92,8 @@ class OpenAIClient:
         self,
         messages: list,
         temperature: float = 0.7,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        model: str = None
     ):
         """
         Call OpenAI chat completion API with streaming.
@@ -101,6 +102,7 @@ class OpenAIClient:
             messages: List of message dictionaries with role and content
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens in response
+            model: Optional model override (defaults to self.model)
             
         Yields:
             str: Chunks of generated text
@@ -108,16 +110,18 @@ class OpenAIClient:
         Raises:
             OpenAIError: If API call fails
         """
+        model_to_use = model or self.model
+        
         try:
             logger.info(
                 "openai_chat_stream_request",
-                model=self.model,
+                model=model_to_use,
                 message_count=len(messages),
                 temperature=temperature
             )
             
             stream = self.client.chat.completions.create(
-                model=self.model,
+                model=model_to_use,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -134,7 +138,7 @@ class OpenAIClient:
             logger.error(
                 "openai_chat_stream_error",
                 error=str(e),
-                model=self.model
+                model=model_to_use
             )
             raise
     

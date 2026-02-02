@@ -1,10 +1,12 @@
--- Migration: Create search_similar_categories function
--- This function performs semantic similarity search using pgvector
+-- Fix: "op ANY/ALL (array) requires array on right side" error
+-- 
+-- ISSUE: The database columns are JSONB, not text[]
+-- The function was using ANY() which only works with PostgreSQL arrays
+-- 
+-- FIX: Use JSONB containment operator @> instead of ANY()
 
--- Drop function if exists (for re-running migration)
 DROP FUNCTION IF EXISTS search_similar_categories(vector(1536), text, integer);
 
--- Create the search function
 CREATE OR REPLACE FUNCTION search_similar_categories(
   query_embedding vector(1536),
   user_geography text DEFAULT NULL,
@@ -45,7 +47,7 @@ BEGIN
   WHERE 
     -- Filter by geography if provided
     -- If user_geography is NULL or 'worldwide', match all categories
-    -- Otherwise, match if user's geography is in category's scope OR category has 'worldwide' scope
+    -- Otherwise, use JSONB containment operator @> to check if geography is in scope
     (user_geography IS NULL 
      OR user_geography = 'worldwide' 
      OR c.geographic_scope @> to_jsonb(ARRAY[user_geography])
@@ -55,14 +57,6 @@ BEGIN
 END;
 $$;
 
--- Grant execute permission
 GRANT EXECUTE ON FUNCTION search_similar_categories TO authenticated;
 GRANT EXECUTE ON FUNCTION search_similar_categories TO anon;
 GRANT EXECUTE ON FUNCTION search_similar_categories TO service_role;
-
--- Test the function (optional - comment out if you want)
--- SELECT * FROM search_similar_categories(
---   (SELECT embedding FROM category_embeddings LIMIT 1),
---   'usa',
---   5
--- );

@@ -1,10 +1,13 @@
--- Migration: Create search_similar_categories function
--- This function performs semantic similarity search using pgvector
+-- Fix geography filter in search_similar_categories function
+-- 
+-- ISSUE: When user_geography is 'worldwide', it was only matching categories 
+-- that have 'worldwide' in their geographic_scope array. This is incorrect.
+-- 
+-- FIX: When user_geography is NULL or 'worldwide', match ALL categories.
+-- Otherwise, match if user's geography is in category's scope OR category has 'worldwide' scope.
 
--- Drop function if exists (for re-running migration)
 DROP FUNCTION IF EXISTS search_similar_categories(vector(1536), text, integer);
 
--- Create the search function
 CREATE OR REPLACE FUNCTION search_similar_categories(
   query_embedding vector(1536),
   user_geography text DEFAULT NULL,
@@ -17,11 +20,11 @@ RETURNS TABLE (
   description text,
   program_name text,
   program_code text,
-  geographic_scope jsonb,
-  applicable_org_types jsonb,
-  applicable_org_sizes jsonb,
+  geographic_scope text[],
+  applicable_org_types text[],
+  applicable_org_sizes text[],
   nomination_subject_type text,
-  achievement_focus jsonb
+  achievement_focus text[]
 )
 LANGUAGE plpgsql
 AS $$
@@ -48,8 +51,8 @@ BEGIN
     -- Otherwise, match if user's geography is in category's scope OR category has 'worldwide' scope
     (user_geography IS NULL 
      OR user_geography = 'worldwide' 
-     OR c.geographic_scope @> to_jsonb(ARRAY[user_geography])
-     OR c.geographic_scope @> to_jsonb(ARRAY['worldwide']))
+     OR user_geography = ANY(c.geographic_scope) 
+     OR 'worldwide' = ANY(c.geographic_scope))
   ORDER BY ce.embedding <=> query_embedding
   LIMIT match_limit;
 END;
@@ -59,10 +62,3 @@ $$;
 GRANT EXECUTE ON FUNCTION search_similar_categories TO authenticated;
 GRANT EXECUTE ON FUNCTION search_similar_categories TO anon;
 GRANT EXECUTE ON FUNCTION search_similar_categories TO service_role;
-
--- Test the function (optional - comment out if you want)
--- SELECT * FROM search_similar_categories(
---   (SELECT embedding FROM category_embeddings LIMIT 1),
---   'usa',
---   5
--- );
