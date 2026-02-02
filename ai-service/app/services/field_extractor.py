@@ -135,9 +135,19 @@ Return a JSON object with the extracted fields. If no fields can be extracted, r
         user_prompt = f"""Current context:
 {context_summary}
 
+Current conversation state: {conversation_state or 'unknown'}
+
 User message: "{user_message}"
 
-Extract any relevant fields from this message. Return only valid JSON.
+Extract any relevant fields from this message based on the conversation state and context. 
+If the user is answering a specific question (indicated by conversation_state), infer which field they're providing.
+For example:
+- If state is "collecting_org_type" and user says "for-profit" → extract org_type: "for_profit"
+- If state is "collecting_org_size" and user says "large" → extract org_size: "large"
+- If user provides a description, extract it as description field
+- Always extract achievement_focus if any focus areas are mentioned
+
+Return only valid JSON.
 
 Extracted fields:"""
         
