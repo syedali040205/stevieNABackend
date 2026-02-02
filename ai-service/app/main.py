@@ -4,7 +4,7 @@ import structlog
 import os
 from dotenv import load_dotenv
 from app.middleware.auth import verify_internal_api_key
-from app.routes import health, metrics, conversation, embeddings, chatbot
+from app.routes import health, metrics, conversation, embeddings, chatbot, search_query
 
 # Load environment variables
 load_dotenv('../scripts/.env')
@@ -55,6 +55,7 @@ app.include_router(metrics.router, tags=["metrics"])
 app.include_router(conversation.router, prefix="/api", tags=["conversation"])
 app.include_router(embeddings.router, prefix="/api", tags=["embeddings"])
 app.include_router(chatbot.router, prefix="/api/chatbot", tags=["chatbot"])
+app.include_router(search_query.router, prefix="/api", tags=["search"])
 # Root endpoint
 @app.get("/")
 async def root():

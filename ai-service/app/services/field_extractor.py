@@ -254,6 +254,7 @@ Extracted fields:"""
     def _infer_achievement_focus(self, description: str) -> list[str]:
         """
         Infer achievement focus areas from description text.
+        ENHANCED: More comprehensive keyword matching for better semantic search.
         
         Args:
             description: Achievement description
@@ -264,50 +265,152 @@ Extracted fields:"""
         description_lower = description.lower()
         focus_areas = []
         
-        # Common keywords to focus area mapping
+        # EXPANDED keyword mapping with more specific matches
         keywords_map = {
+            # Technology & AI
+            "ai": ["Artificial Intelligence", "Technology"],
+            "artificial intelligence": ["Artificial Intelligence", "Technology"],
+            "machine learning": ["Machine Learning", "Technology"],
+            "ml": ["Machine Learning", "Technology"],
+            "blockchain": ["Blockchain", "Technology"],
+            "cloud": ["Cloud Computing", "Technology"],
+            "cybersecurity": ["Cybersecurity", "Technology"],
+            "data": ["Data Analytics", "Technology"],
+            "analytics": ["Data Analytics", "Technology"],
+            "software": ["Software Development", "Technology"],
+            "mobile": ["Mobile Technology", "Technology"],
+            "iot": ["Internet of Things", "Technology"],
+            "automation": ["Automation", "Technology"],
+            "digital": ["Digital Transformation", "Technology"],
+            
+            # Healthcare & Quality
+            "who": ["Healthcare", "Global Recognition", "Quality Management"],
+            "health": ["Healthcare"],
+            "medical": ["Healthcare", "Medical Innovation"],
+            "patient": ["Healthcare", "Patient Care"],
+            "rating": ["Quality Management", "Performance Excellence"],
+            "quality": ["Quality Management"],
+            "certification": ["Quality Management", "Compliance"],
+            "compliance": ["Compliance", "Quality Management"],
+            "safety": ["Safety", "Quality Management"],
+            
+            # Business Functions
             "marketing": ["Marketing", "Brand Management"],
-            "sales": ["Sales"],
-            "customer service": ["Customer Service"],
-            "innovation": ["Innovation"],
-            "technology": ["Technology"],
-            "ai": ["Artificial Intelligence"],
-            "artificial intelligence": ["Artificial Intelligence"],
-            "machine learning": ["Machine Learning"],
-            "digital": ["Digital Transformation"],
-            "leadership": ["Leadership"],
-            "management": ["Management"],
-            "product": ["Product Development"],
-            "software": ["Software Development"],
-            "data": ["Data Analytics"],
-            "analytics": ["Data Analytics"],
-            "cloud": ["Cloud Computing"],
-            "cybersecurity": ["Cybersecurity"],
-            "mobile": ["Mobile Technology"],
-            "web": ["Web Development"],
-            "ecommerce": ["E-commerce"],
-            "social media": ["Social Media"],
-            "content": ["Content Marketing"],
-            "seo": ["SEO"],
-            "advertising": ["Advertising"],
-            "hr": ["Human Resources"],
-            "finance": ["Finance"],
-            "operations": ["Operations"],
-            "supply chain": ["Supply Chain"],
-            "logistics": ["Logistics"],
-            "manufacturing": ["Manufacturing"],
-            "healthcare": ["Healthcare"],
-            "education": ["Education"],
-            "sustainability": ["Sustainability"],
+            "brand": ["Brand Management", "Marketing"],
+            "advertising": ["Advertising", "Marketing"],
+            "sales": ["Sales", "Revenue Growth"],
+            "revenue": ["Revenue Growth", "Financial Performance"],
+            "customer service": ["Customer Service", "Customer Experience"],
+            "customer experience": ["Customer Experience"],
+            "customer support": ["Customer Service", "Customer Experience"],
+            "cx": ["Customer Experience"],
+            "innovation": ["Innovation", "Product Development"],
+            "product": ["Product Development", "Product Excellence"],
+            "service": ["Service Excellence"],
+            "ecommerce": ["E-commerce", "Digital Commerce"],
+            "e-commerce": ["E-commerce", "Digital Commerce"],
+            
+            # Leadership & Management
+            "leadership": ["Leadership", "Management Excellence"],
+            "management": ["Management Excellence"],
+            "team": ["Team Performance", "Collaboration"],
+            "collaboration": ["Collaboration", "Team Performance"],
+            "culture": ["Organizational Culture", "Employee Engagement"],
+            "employee": ["Employee Engagement", "Human Resources"],
             "diversity": ["Diversity & Inclusion"],
+            "inclusion": ["Diversity & Inclusion"],
+            "hr": ["Human Resources"],
+            "talent": ["Talent Management", "Human Resources"],
+            
+            # Growth & Performance
+            "growth": ["Business Growth", "Revenue Growth"],
+            "profit": ["Financial Performance"],
+            "expansion": ["Business Growth", "Market Expansion"],
+            "global": ["Global Operations", "International Expansion"],
+            "international": ["International Expansion"],
+            "worldwide": ["Global Operations", "International Expansion"],
+            "performance": ["Performance Excellence"],
+            "excellence": ["Performance Excellence"],
+            "achievement": ["Performance Excellence"],
+            
+            # Specific Industries
+            "education": ["Education", "Training & Development"],
+            "training": ["Training & Development"],
+            "finance": ["Finance", "Financial Services"],
+            "banking": ["Finance", "Financial Services"],
+            "retail": ["Retail", "E-commerce"],
+            "manufacturing": ["Manufacturing", "Operations Excellence"],
+            "logistics": ["Logistics", "Supply Chain"],
+            "supply chain": ["Supply Chain", "Operations Excellence"],
+            "operations": ["Operations Excellence"],
+            
+            # Sustainability & Social
+            "sustainability": ["Sustainability", "Environmental Responsibility"],
+            "environment": ["Environmental Responsibility"],
+            "green": ["Sustainability", "Environmental Responsibility"],
+            "social": ["Social Responsibility", "Community Impact"],
+            "community": ["Community Impact"],
+            "charity": ["Social Responsibility", "Community Impact"],
+            "nonprofit": ["Social Responsibility"],
+            
+            # Communication & Media
+            "communication": ["Communication", "Public Relations"],
+            "pr": ["Public Relations", "Communication"],
+            "social media": ["Social Media", "Digital Marketing"],
+            "content": ["Content Marketing", "Marketing"],
+            "seo": ["SEO", "Digital Marketing"],
+            "web": ["Web Development", "Technology"],
+            "website": ["Web Development", "Technology"],
+            
+            # Awards & Recognition
+            "award": ["Recognition", "Excellence"],
+            "recognition": ["Recognition", "Excellence"],
+            "winner": ["Recognition", "Excellence"],
+            "best": ["Excellence"],
+            "top": ["Excellence"],
         }
         
+        # Extract focus areas based on keywords
         for keyword, areas in keywords_map.items():
             if keyword in description_lower:
                 focus_areas.extend(areas)
         
-        # Remove duplicates and return
-        return list(set(focus_areas)) if focus_areas else ["Business Excellence"]
+        # Remove duplicates
+        focus_areas = list(set(focus_areas))
+        
+        # If still empty, try to extract from common achievement patterns
+        if not focus_areas:
+            # Check for achievement verbs
+            achievement_patterns = {
+                "increased": ["Performance Excellence", "Growth"],
+                "improved": ["Performance Excellence", "Continuous Improvement"],
+                "launched": ["Innovation", "Product Development"],
+                "developed": ["Product Development", "Innovation"],
+                "created": ["Innovation", "Creativity"],
+                "achieved": ["Performance Excellence"],
+                "won": ["Recognition", "Excellence"],
+                "gained": ["Growth", "Market Success"],
+                "grew": ["Business Growth"],
+                "expanded": ["Business Growth", "Market Expansion"],
+                "transformed": ["Transformation", "Innovation"],
+                "revolutionized": ["Innovation", "Disruption"],
+                "pioneered": ["Innovation", "Leadership"],
+            }
+            
+            for pattern, areas in achievement_patterns.items():
+                if pattern in description_lower:
+                    focus_areas.extend(areas)
+        
+        # Final fallback - but try to be more specific based on description length
+        if not focus_areas:
+            # If description is long and detailed, assume it's about business excellence
+            # If short, might be incomplete
+            if len(description) > 50:
+                focus_areas = ["Business Excellence"]
+            else:
+                focus_areas = ["General Achievement"]
+        
+        return list(set(focus_areas))
 
 # Global instance
 field_extractor = FieldExtractor()

@@ -82,58 +82,74 @@ export class EmbeddingManager {
 
   /**
    * Format user query into text for embedding.
-   * Format: "Organization: [organization_name] in [geography]. Type: [org_type], Size: [org_size]. 
-   * Nominating: [nomination_subject]. Achievement: [description]. Focus areas: [achievement_focus]. 
-   * Tech orientation: [tech_orientation]. Operating scope: [operating_scope]."
+   * OPTIMIZED: Achievement and focus areas come first for better semantic matching.
    */
   formatUserQueryText(context: UserContext): string {
     const parts: string[] = [];
 
-    // Organization and location
-    if (context.organization_name && context.geography) {
-      parts.push(`Organization: ${context.organization_name} in ${context.geography}.`);
-    } else if (context.organization_name) {
-      parts.push(`Organization: ${context.organization_name}.`);
-    } else if (context.geography) {
-      parts.push(`Location: ${context.geography}.`);
-    }
-
-    // Organization type and size
-    const orgDetails: string[] = [];
-    if (context.org_type) {
-      orgDetails.push(`Type: ${context.org_type}`);
-    }
-    if (context.org_size) {
-      orgDetails.push(`Size: ${context.org_size}`);
-    }
-    if (orgDetails.length > 0) {
-      parts.push(orgDetails.join(', ') + '.');
-    }
-
-    // Nomination subject
-    if (context.nomination_subject) {
-      parts.push(`Nominating: ${context.nomination_subject}.`);
-    }
-
-    // Achievement description
+    // 1. ACHIEVEMENT FIRST (most important for semantic matching)
     if (context.description) {
       parts.push(`Achievement: ${context.description}.`);
     }
 
-    // Focus areas
+    // 2. FOCUS AREAS (critical for matching relevant categories)
     if (context.achievement_focus && context.achievement_focus.length > 0) {
       const focusAreas = context.achievement_focus.join(', ');
       parts.push(`Focus areas: ${focusAreas}.`);
     }
 
-    // Tech orientation
-    if (context.tech_orientation) {
-      parts.push(`Tech orientation: ${context.tech_orientation}.`);
+    // 3. Nomination subject with context
+    if (context.nomination_subject) {
+      const subjectContext: Record<string, string> = {
+        'product': 'Nominating a product or service',
+        'organization': 'Nominating an entire organization',
+        'team': 'Nominating a team or department',
+        'individual': 'Nominating an individual person'
+      };
+      parts.push(subjectContext[context.nomination_subject] || `Nominating: ${context.nomination_subject}.`);
     }
 
-    // Operating scope
+    // 4. Organization context (less important for semantic matching)
+    const orgDetails: string[] = [];
+    if (context.org_type) {
+      const orgTypeLabels: Record<string, string> = {
+        'for_profit': 'For-profit organization',
+        'non_profit': 'Non-profit organization',
+        'government': 'Government organization'
+      };
+      orgDetails.push(orgTypeLabels[context.org_type] || context.org_type);
+    }
+    if (context.org_size) {
+      const sizeLabels: Record<string, string> = {
+        'small': 'Small organization (up to 100 employees)',
+        'medium': 'Medium organization (101-2,500 employees)',
+        'large': 'Large organization (2,501+ employees)'
+      };
+      orgDetails.push(sizeLabels[context.org_size] || context.org_size);
+    }
+    if (orgDetails.length > 0) {
+      parts.push(orgDetails.join(', ') + '.');
+    }
+
+    // 5. Tech orientation (helps distinguish tech vs non-tech categories)
+    if (context.tech_orientation) {
+      const techLabels: Record<string, string> = {
+        'tech_company': 'Technology company',
+        'tech_user': 'Technology user',
+        'non_tech': 'Non-technology focused'
+      };
+      parts.push(techLabels[context.tech_orientation] || context.tech_orientation + '.');
+    }
+
+    // 6. Operating scope
     if (context.operating_scope) {
-      parts.push(`Operating scope: ${context.operating_scope}.`);
+      const scopeLabels: Record<string, string> = {
+        'local': 'Local operations',
+        'regional': 'Regional operations',
+        'national': 'National operations',
+        'international': 'International operations'
+      };
+      parts.push(scopeLabels[context.operating_scope] || context.operating_scope + '.');
     }
 
     return parts.join(' ');
@@ -187,14 +203,47 @@ export class EmbeddingManager {
 
   /**
    * Generate embedding for user query based on UserContext.
+   * Uses LLM to create natural language query for better semantic matching.
    */
   async generateUserEmbedding(context: UserContext): Promise<number[]> {
-    const queryText = this.formatUserQueryText(context);
-    logger.info('formatted_user_query_text', {
+    // Use LLM to generate natural search query
+    const queryText = await this.generateSearchQuery(context);
+    logger.info('generated_search_query', {
       text: queryText,
       context: context,
     });
     return this.generateEmbedding(queryText);
+  }
+
+  /**
+   * Use LLM to generate a natural language search query from UserContext.
+   * This produces better embeddings than manual string formatting.
+   */
+  private async generateSearchQuery(context: UserContext): Promise<string> {
+    try {
+      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+      const apiKey = process.env.INTERNAL_API_KEY || '';
+
+      const response = await axios.post(
+        `${aiServiceUrl}/api/generate-search-query`,
+        { context },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+          },
+          timeout: 10000,
+        }
+      );
+
+      return response.data.query;
+    } catch (error: any) {
+      logger.warn('search_query_generation_failed_using_fallback', {
+        error: error.message,
+      });
+      // Fallback to manual formatting if LLM fails
+      return this.formatUserQueryText(context);
+    }
   }
 
   /**
@@ -231,6 +280,18 @@ export class EmbeddingManager {
       logger.info('similarity_search_complete', {
         results_count: data?.length || 0,
       });
+
+      // Log detailed similarity scores for analysis
+      if (data && data.length > 0) {
+        logger.info('similarity_results_detail', {
+          top_results: data.slice(0, 5).map((r: any) => ({
+            category: r.category_name,
+            score: Math.round(r.similarity_score * 1000) / 1000,
+            focus: r.achievement_focus,
+            program: r.program_name
+          }))
+        });
+      }
 
       return (data || []) as SimilarityResult[];
     } catch (error: any) {

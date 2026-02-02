@@ -118,3 +118,31 @@ class GenerateExplanationsResponse(BaseModel):
                 ]
             }
         }
+
+class GenerateSearchQueryRequest(BaseModel):
+    """Request model for search query generation"""
+    context: UserContext = Field(..., description="User context to generate search query from")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "context": {
+                    "description": "Our product gained 9.8/10 ratings globally on WHO rating polls",
+                    "achievement_focus": ["Healthcare", "Quality Management"],
+                    "nomination_subject": "product",
+                    "org_type": "for_profit"
+                }
+            }
+        }
+
+class GenerateSearchQueryResponse(BaseModel):
+    """Response model for search query generation"""
+    query: str = Field(..., description="Natural language search query for semantic matching")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "Healthcare product with exceptional WHO quality ratings and global recognition for excellence in quality management"
+            }
+        }
+
