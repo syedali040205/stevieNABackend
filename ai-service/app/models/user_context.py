@@ -48,6 +48,10 @@ class UserContext(BaseModel):
     User context for Stevie Awards recommendation.
     Represents all information collected during the conversation.
     """
+    # User personal information
+    user_name: Optional[str] = Field(None, description="User's full name")
+    user_email: Optional[str] = Field(None, description="User's email address")
+    
     # Pre-populated from user profile
     geography: Optional[Geography] = None
     organization_name: Optional[str] = None

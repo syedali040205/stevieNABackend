@@ -224,8 +224,10 @@ Answer their question naturally and conversationally. Keep it SHORT (2-3 sentenc
         elif intent_type == "information":
             # What info are we still missing?
             missing = []
-            if not user_context.organization_name:
+            if not user_context.user_name:
                 missing.append("their name")
+            if not user_context.user_email:
+                missing.append("their email")
             if not user_context.nomination_subject:
                 missing.append("what they're nominating (individual/team/org/product)")
             if not user_context.description:

@@ -114,6 +114,8 @@ class FieldExtractor:
 Extract relevant fields from the user's message and return them as JSON.
 
 Available fields and their allowed values:
+- user_name: User's full name (free text)
+- user_email: User's email address (free text)
 - org_type: "for_profit", "non_profit", "government"
 - org_size: "small" (up to 100 employees), "medium" (101-2,500), "large" (2,501+)
 - nomination_subject: "organization", "team", "individual", "product"

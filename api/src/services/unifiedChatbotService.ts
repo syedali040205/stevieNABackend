@@ -308,8 +308,7 @@ export class UnifiedChatbotService {
       logger.info('step_3_extracting_fields');
       const extractedFields = await this.extractFieldsFromMessage(
         message,
-        userContext,
-        conversationHistory
+        userContext
       );
 
       // Log detailed extraction results
@@ -624,8 +623,7 @@ export class UnifiedChatbotService {
    */
   private async extractFieldsFromMessage(
     message: string,
-    userContext: any,
-    conversationHistory: any[]
+    userContext: any
   ): Promise<any> {
     try {
       const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
@@ -687,8 +685,10 @@ export class UnifiedChatbotService {
       messageLower.includes('okay');
 
     // Check if we have minimum required fields for recommendations
-    // At minimum need: nomination_subject and description
+    // Need: user_name, user_email, nomination_subject, and description
     const hasMinimumInfo = !!(
+      context.user_name &&
+      context.user_email &&
       context.nomination_subject &&
       context.description &&
       context.description.length > 20
@@ -697,6 +697,8 @@ export class UnifiedChatbotService {
     logger.info('recommendation_check', {
       asking: askingForRecommendations,
       has_minimum: hasMinimumInfo,
+      has_name: !!context.user_name,
+      has_email: !!context.user_email,
       nomination_subject: context.nomination_subject,
       has_description: !!context.description,
       description_length: context.description?.length || 0,
