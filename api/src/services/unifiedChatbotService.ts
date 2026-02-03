@@ -226,6 +226,35 @@ export class UnifiedChatbotService {
                 user_id: userId,
                 geography: geography,
               });
+            } else {
+              // User doesn't have a profile yet - they haven't completed onboarding
+              // Create a basic user record so the foreign key constraint is satisfied
+              logger.warn('user_profile_not_found_creating_basic_record', {
+                user_id: userId,
+              });
+              
+              // Insert basic user record
+              const { error: userInsertError } = await this.supabase
+                .from('users')
+                .insert({
+                  id: userId,
+                  email: 'unknown@example.com', // Placeholder
+                  full_name: 'Guest User',
+                  country: 'Unknown',
+                  organization_name: 'Unknown',
+                })
+                .select()
+                .single();
+              
+              if (userInsertError) {
+                // If error is duplicate key, that's fine - user exists
+                if (!userInsertError.message.includes('duplicate key')) {
+                  logger.error('failed_to_create_basic_user_record', {
+                    user_id: userId,
+                    error: userInsertError.message,
+                  });
+                }
+              }
             }
           } catch (error: any) {
             logger.error('failed_to_load_profile', {
