@@ -208,7 +208,11 @@ Keep it SHORT and helpful."""
         if intent_type == "question":
             kb_context = self._build_kb_context(kb_articles) if kb_articles else "No KB articles found"
             
-            return f"""WHAT WE KNOW:
+            # Check if we have relevant KB articles
+            has_relevant_kb = kb_articles is not None and len(kb_articles) > 0
+            
+            if has_relevant_kb:
+                return f"""WHAT WE KNOW:
 {context_summary}
 
 RECENT CONVERSATION:
@@ -219,7 +223,21 @@ THEIR QUESTION: "{message}"
 KNOWLEDGE BASE INFO:
 {kb_context}
 
-Answer their question naturally and conversationally. Keep it SHORT (2-3 sentences). Use the KB info above."""
+Answer their question naturally and conversationally using the KB info above. Keep it SHORT (2-3 sentences)."""
+            else:
+                return f"""WHAT WE KNOW:
+{context_summary}
+
+RECENT CONVERSATION:
+{history_summary}
+
+THEIR QUESTION: "{message}"
+
+NO RELEVANT KB ARTICLES FOUND.
+
+The knowledge base doesn't have specific information about this question. Answer from your general knowledge about the Stevie Awards and business awards in general. Be helpful and conversational. Keep it SHORT (2-3 sentences).
+
+If you don't know the answer, be honest and suggest they contact support or check the official Stevie Awards website."""
         
         elif intent_type == "information":
             # What info are we still missing?
@@ -253,8 +271,10 @@ Respond naturally:
         
         else:  # mixed
             kb_context = self._build_kb_context(kb_articles) if kb_articles else "No KB articles"
+            has_relevant_kb = kb_articles is not None and len(kb_articles) > 0
             
-            return f"""WHAT WE KNOW:
+            if has_relevant_kb:
+                return f"""WHAT WE KNOW:
 {context_summary}
 
 RECENT CONVERSATION:
@@ -270,6 +290,24 @@ They asked a question AND shared info. Respond naturally:
 2. Acknowledge the info they shared
 3. Continue the conversation naturally
 Keep it SHORT and conversational."""
+            else:
+                return f"""WHAT WE KNOW:
+{context_summary}
+
+RECENT CONVERSATION:
+{history_summary}
+
+THEY SAID: "{message}"
+
+NO RELEVANT KB ARTICLES FOUND.
+
+They asked a question AND shared info. Respond naturally:
+1. Answer their question first (use general knowledge about Stevie Awards)
+2. Acknowledge the info they shared
+3. Continue the conversation naturally
+Keep it SHORT and conversational.
+
+If you don't know the answer to their question, be honest and suggest they check the official Stevie Awards website."""
     
     def _build_kb_context(self, articles: Optional[List[Dict[str, Any]]]) -> str:
         """Build KB context from articles."""
