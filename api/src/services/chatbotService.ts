@@ -186,20 +186,40 @@ export class ChatbotService {
         }
       );
 
-      // Parse SSE stream
+      // Parse SSE stream using proper Node.js stream handling
       const stream = response.data;
       let buffer = '';
 
+      // Use readable stream async iterator (Node 10+)
+      stream.setEncoding('utf8');
+      
       for await (const chunk of stream) {
-        buffer += chunk.toString();
+        buffer += chunk;
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            yield data;
+            try {
+              const data = JSON.parse(line.slice(6));
+              yield data;
+            } catch (parseError: any) {
+              logger.error('sse_parse_error', { 
+                line: line.substring(0, 100), 
+                error: parseError.message 
+              });
+            }
           }
+        }
+      }
+
+      // Process any remaining buffer
+      if (buffer.trim() && buffer.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.slice(6));
+          yield data;
+        } catch (parseError: any) {
+          logger.error('sse_final_parse_error', { error: parseError.message });
         }
       }
     } catch (error: any) {

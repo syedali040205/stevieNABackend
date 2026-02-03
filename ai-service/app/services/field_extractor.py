@@ -141,11 +141,31 @@ User message: "{user_message}"
 
 Extract any relevant fields from this message based on the conversation state and context. 
 If the user is answering a specific question (indicated by conversation_state), infer which field they're providing.
-For example:
-- If state is "collecting_org_type" and user says "for-profit" → extract org_type: "for_profit"
-- If state is "collecting_org_size" and user says "large" → extract org_size: "large"
-- If user provides a description, extract it as description field
-- Always extract achievement_focus if any focus areas are mentioned
+
+IMPORTANT EXTRACTION RULES:
+1. For nomination_subject:
+   - "team", "our team", "my team" → "team"
+   - "product", "our product" → "product"
+   - "myself", "me", "I" → "individual"
+   - "organization", "company" → "organization"
+
+2. For description:
+   - Extract the FULL description of what they're nominating
+   - Include ALL details about achievements, features, outcomes
+   - Be comprehensive - don't truncate
+
+3. For achievement_focus:
+   - Extract EVERY achievement area, technology, or focus mentioned
+   - Include specific technologies (AI, ML, smart home, IoT, etc.)
+   - Include business areas (innovation, customer service, etc.)
+   - Include product/service areas
+   - Include any awards or recognition mentioned
+   - Be VERY thorough - extract ALL relevant areas
+
+Examples:
+- "our team built a smart mirror" → nomination_subject: "team", description: "built a smart mirror", achievement_focus: ["Smart Technology", "Product Development", "Consumer Electronics"]
+- "we won top 5 at IDEATHON" → achievement_focus: ["Recognition", "Competition Success", "Innovation"]
+- "it's a luxury item with AI" → achievement_focus: ["Luxury Goods", "Artificial Intelligence", "Premium Products"]
 
 Return only valid JSON.
 

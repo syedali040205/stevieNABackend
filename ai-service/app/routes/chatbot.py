@@ -66,28 +66,44 @@ async def generate_answer_stream(
         
         async def event_generator():
             """Generate SSE events"""
-            # Send metadata first
-            metadata = {
-                "type": "metadata",
-                "confidence": confidence,
-                "sources": sources
-            }
-            yield f"data: {json.dumps(metadata)}\n\n"
-            
-            # Stream answer chunks
-            for chunk in answer_generator.generate_answer_stream(
-                question=request.question,
-                context_articles=articles_dict,
-                max_tokens=request.max_tokens
-            ):
-                data = {
-                    "type": "chunk",
-                    "content": chunk
+            try:
+                # Send metadata first
+                metadata = {
+                    "type": "metadata",
+                    "confidence": confidence,
+                    "sources": sources
                 }
-                yield f"data: {json.dumps(data)}\n\n"
-            
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                logger.info(f"Sending metadata: {metadata}")
+                yield f"data: {json.dumps(metadata)}\n\n"
+                
+                # Stream answer chunks
+                chunk_count = 0
+                for chunk in answer_generator.generate_answer_stream(
+                    question=request.question,
+                    context_articles=articles_dict,
+                    max_tokens=request.max_tokens
+                ):
+                    chunk_count += 1
+                    data = {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+                    yield f"data: {json.dumps(data)}\n\n"
+                
+                logger.info(f"Streamed {chunk_count} chunks")
+                
+                # Send completion event
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                logger.info("Stream complete")
+                
+            except Exception as e:
+                logger.error(f"Error in event_generator: {str(e)}")
+                # Send error event
+                error_data = {
+                    "type": "error",
+                    "message": "Failed to generate answer"
+                }
+                yield f"data: {json.dumps(error_data)}\n\n"
         
         return StreamingResponse(
             event_generator(),

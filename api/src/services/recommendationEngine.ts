@@ -53,28 +53,32 @@ export class RecommendationEngine {
 
   /**
    * Validate that UserContext has all required fields for recommendations.
+   * Made more lenient - only requires nomination_subject and description.
    */
   private validateContextCompleteness(context: UserContext): boolean {
-    const requiredFields = [
-      'org_type',
-      'org_size',
+    // Minimum required fields
+    const criticalFields = [
       'nomination_subject',
       'description',
-      'achievement_focus',
     ];
 
-    for (const field of requiredFields) {
+    for (const field of criticalFields) {
       const value = context[field as keyof UserContext];
-      if (value === undefined || value === null) {
-        logger.warn('incomplete_context', { missing_field: field });
+      if (value === undefined || value === null || value === '') {
+        logger.warn('incomplete_context_critical', { missing_field: field });
         return false;
       }
+    }
 
-      // Check achievement_focus is non-empty array
-      if (field === 'achievement_focus' && Array.isArray(value) && value.length === 0) {
-        logger.warn('incomplete_context', { missing_field: 'achievement_focus (empty)' });
-        return false;
-      }
+    // Warn about optional fields but don't fail
+    if (!context.org_type) {
+      logger.info('using_default_org_type', { default: 'for_profit' });
+    }
+    if (!context.org_size) {
+      logger.info('using_default_org_size', { default: 'small' });
+    }
+    if (!context.achievement_focus || context.achievement_focus.length === 0) {
+      logger.info('using_default_achievement_focus', { default: ['Innovation', 'Technology'] });
     }
 
     return true;
@@ -140,20 +144,30 @@ export class RecommendationEngine {
         results_count: similarityResults.length,
       });
 
-      // Step 5: Format recommendations
-      let recommendations: Recommendation[] = similarityResults.map((result) => ({
-        category_id: result.category_id,
-        category_name: result.category_name,
-        description: result.description,
-        program_name: result.program_name,
-        program_code: result.program_code,
-        similarity_score: result.similarity_score,
-        geographic_scope: result.geographic_scope,
-        applicable_org_types: result.applicable_org_types,
-        applicable_org_sizes: result.applicable_org_sizes,
-        nomination_subject_type: result.nomination_subject_type,
-        achievement_focus: result.achievement_focus,
-      }));
+      // Step 5: Format recommendations and deduplicate by category_id
+      const seen = new Set<string>();
+      let recommendations: Recommendation[] = similarityResults
+        .filter((result) => {
+          if (seen.has(result.category_id)) {
+            logger.info('duplicate_category_filtered', { category_id: result.category_id });
+            return false;
+          }
+          seen.add(result.category_id);
+          return true;
+        })
+        .map((result) => ({
+          category_id: result.category_id,
+          category_name: result.category_name,
+          description: result.description,
+          program_name: result.program_name,
+          program_code: result.program_code,
+          similarity_score: result.similarity_score,
+          geographic_scope: result.geographic_scope,
+          applicable_org_types: result.applicable_org_types,
+          applicable_org_sizes: result.applicable_org_sizes,
+          nomination_subject_type: result.nomination_subject_type,
+          achievement_focus: result.achievement_focus,
+        }));
 
       // Step 6: Optionally enrich with explanations
       if (includeExplanations && recommendations.length > 0) {

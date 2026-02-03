@@ -53,9 +53,14 @@ import metricsRouter from './routes/metrics';
 import usersRouter from './routes/users';
 import conversationRouter from './routes/conversation';
 import chatbotRouter from './routes/chatbot';
+import unifiedChatbotRouter from './routes/unified-chatbot';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy - Required for Render and other reverse proxies
+// This allows express-rate-limit to correctly identify users by IP
+app.set('trust proxy', 1);
 
 // CORS configuration - Allow all origins (use with caution in production)
 const corsOptions = {
@@ -123,8 +128,9 @@ try {
 app.use('/api/health', healthRouter);
 app.use('/metrics', metricsRouter);
 app.use('/api/users', usersRouter);
-app.use('/api/conversation', conversationRouter);
-app.use('/api/chatbot', chatbotRouter);
+app.use('/api', unifiedChatbotRouter);  // Unified chatbot (new)
+app.use('/api/conversation', conversationRouter);  // Legacy
+app.use('/api/chatbot', chatbotRouter);  // Legacy
 
 // Root endpoint
 app.get('/', (_req, res) => {

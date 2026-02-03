@@ -146,3 +146,46 @@ class GenerateSearchQueryResponse(BaseModel):
             }
         }
 
+
+
+# ============================================================================
+# Unified Chatbot Models
+# ============================================================================
+
+class UnifiedChatRequest(BaseModel):
+    """Request for unified chatbot conversation"""
+    message: str = Field(..., description="User's message")
+    session_id: str = Field(..., description="Session ID")
+    conversation_history: List[Dict[str, str]] = Field(default=[], description="Previous messages")
+    user_context: UserContext = Field(..., description="Current user context")
+    kb_articles: Optional[List[Dict[str, Any]]] = Field(None, description="KB articles for question answering")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "I want to nominate my company",
+                "session_id": "uuid-here",
+                "conversation_history": [],
+                "user_context": {
+                    "geography": "usa",
+                    "organization_name": "Acme Corp"
+                },
+                "kb_articles": None
+            }
+        }
+
+
+class IntentClassificationResponse(BaseModel):
+    """Intent classification result"""
+    intent: str = Field(..., description="Intent type: question, information, or mixed")
+    confidence: float = Field(..., description="Confidence score 0-1")
+    reasoning: str = Field(..., description="Brief explanation")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "intent": "information",
+                "confidence": 0.95,
+                "reasoning": "User is providing nomination details"
+            }
+        }

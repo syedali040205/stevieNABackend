@@ -97,6 +97,7 @@ Note: Specific information about this topic is not available in the knowledge ba
         
         try:
             # Stream answer using OpenAI with gpt-4o-mini
+            chunk_count = 0
             for chunk in self.client.chat_completion_stream(
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -105,9 +106,10 @@ Note: Specific information about this topic is not available in the knowledge ba
                 temperature=0.7,
                 max_tokens=max_tokens
             ):
+                chunk_count += 1
                 yield chunk
             
-            logger.info("answer_stream_complete", used_context=has_context)
+            logger.info("answer_stream_complete", used_context=has_context, chunks_sent=chunk_count)
             
         except Exception as e:
             logger.error("answer_stream_error", error=str(e))

@@ -4,7 +4,7 @@ import structlog
 import os
 from dotenv import load_dotenv
 from app.middleware.auth import verify_internal_api_key
-from app.routes import health, metrics, conversation, embeddings, chatbot, search_query
+from app.routes import health, metrics, conversation, embeddings, chatbot, search_query, unified_chatbot
 
 # Load environment variables
 load_dotenv('../scripts/.env')
@@ -52,12 +52,14 @@ async def log_requests(request: Request, call_next):
 # Include routers
 app.include_router(health.router, tags=["health"])
 app.include_router(metrics.router, tags=["metrics"])
+app.include_router(unified_chatbot.router, prefix="/api/unified", tags=["unified-chatbot"])
 app.include_router(conversation.router, prefix="/api", tags=["conversation"])
 app.include_router(embeddings.router, prefix="/api", tags=["embeddings"])
 app.include_router(chatbot.router, prefix="/api/chatbot", tags=["chatbot"])
 app.include_router(search_query.router, prefix="/api", tags=["search"])
-# Root endpoint
+# Root endpoint - supports both GET and HEAD for health checks
 @app.get("/")
+@app.head("/")
 async def root():
     return {
         "service": "Stevie Awards AI Service",
