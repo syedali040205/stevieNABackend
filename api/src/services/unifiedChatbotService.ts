@@ -221,9 +221,8 @@ export class UnifiedChatbotService {
         logger.info('session_not_found_creating_new', { session_id: sessionId });
         
         // Create new session with the provided sessionId
-        // For dashboard chatbot (no auth), use special anonymous UUID
-        // Using a fixed UUID for all anonymous users: 00000000-0000-0000-0000-000000000000
-        const effectiveUserId = userId || '00000000-0000-0000-0000-000000000000';
+        // For anonymous users (no auth), user_id will be null
+        const effectiveUserId = userId || null;
         const expiresAt = new Date(Date.now() + 3600000); // 1 hour
         
         // Initialize user context
@@ -232,38 +231,6 @@ export class UnifiedChatbotService {
           organization_name: null,
           job_title: null,
         };
-        
-        // Ensure the user exists in the database (for foreign key constraint)
-        if (!userId) {
-          // Anonymous user - ensure the anonymous user record exists
-          const { data: existingAnonymous, error: checkError } = await this.supabase
-            .from('users')
-            .select('id')
-            .eq('id', effectiveUserId)
-            .single();
-          
-          if (checkError || !existingAnonymous) {
-            // Create anonymous user record
-            logger.info('creating_anonymous_user_record');
-            const { error: anonInsertError } = await this.supabase
-              .from('users')
-              .insert({
-                id: effectiveUserId,
-                email: 'anonymous@stevieawards.com',
-                full_name: 'Anonymous User',
-                country: 'Unknown',
-                organization_name: 'Anonymous',
-              })
-              .select()
-              .single();
-            
-            if (anonInsertError && !anonInsertError.message.includes('duplicate key')) {
-              logger.error('failed_to_create_anonymous_user', {
-                error: anonInsertError.message,
-              });
-            }
-          }
-        }
         
         // If authenticated user, fetch profile and populate context
         if (userId) {
