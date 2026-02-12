@@ -105,10 +105,14 @@ IMPORTANT:
       return basePrompt + `
 
 RIGHT NOW: They want category recommendations.
-- Great! Let's help them find the right categories
-- First, check if you have: their name, email, what they're nominating, and the achievement story
-- If missing any of these, ask for them naturally (one at a time, not all at once)
-- Once you have the basics, I'll generate personalized category recommendations
+- This is great! But we need specific information first
+- Ask for missing information in this order:
+  1. Their name (if missing)
+  2. Their email (if missing)
+  3. What they're nominating: individual/team/organization/product (if missing)
+  4. Description of the achievement (if missing or too short)
+- Ask for ONE thing at a time, naturally
+- Once you have all four, I'll generate personalized recommendations
 - Keep it conversational and encouraging`;
     } else if (intentType === 'question') {
       return basePrompt + `
@@ -205,7 +209,50 @@ Keep it SHORT and helpful.`;
     }
 
     // Build prompt based on intent
-    if (intentType === 'question') {
+    if (intentType === 'recommendation') {
+      // Special handling for recommendation intent - guide through required fields
+      const missing: string[] = [];
+      if (!userContext.user_name) missing.push('name');
+      if (!userContext.user_email) missing.push('email');
+      if (!userContext.nomination_subject) missing.push('nomination subject (individual/team/org/product)');
+      if (!userContext.description || userContext.description.length < 20) missing.push('achievement description');
+
+      if (missing.length > 0) {
+        return `WHAT WE KNOW:
+${contextSummary}
+
+RECENT CONVERSATION:
+${historySummary}
+
+THEY SAID: "${message}"
+
+THEY WANT RECOMMENDATIONS!
+
+STILL NEED: ${missing.join(', ')}
+
+Ask for the FIRST missing item from this list in order:
+1. Name
+2. Email  
+3. What they're nominating (individual/team/organization/product)
+4. Achievement description
+
+Ask naturally and conversationally. ONE question at a time. Keep it SHORT (1-2 sentences).`;
+      } else {
+        return `WHAT WE KNOW:
+${contextSummary}
+
+RECENT CONVERSATION:
+${historySummary}
+
+THEY SAID: "${message}"
+
+GREAT NEWS: We have all required info (name, email, nomination subject, description)!
+
+Respond with: "Perfect! Let me find the best matching categories for you." 
+
+Keep it SHORT and positive. The system will automatically generate recommendations after your response.`;
+      }
+    } else if (intentType === 'question') {
       const kbContext = this.buildKBContext(kbArticles);
       const hasRelevantKB = kbArticles && kbArticles.length > 0;
 
