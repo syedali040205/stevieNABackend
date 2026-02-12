@@ -215,7 +215,6 @@ Keep it SHORT and helpful.`;
       if (!userContext.user_name) missing.push('name');
       if (!userContext.user_email) missing.push('email');
       if (!userContext.nomination_subject) missing.push('nomination subject (individual/team/org/product)');
-      if (!userContext.description || userContext.description.length < 20) missing.push('achievement description');
 
       if (missing.length > 0) {
         return `WHAT WE KNOW:
@@ -234,7 +233,6 @@ Ask for the FIRST missing item from this list in order:
 1. Name
 2. Email  
 3. What they're nominating (individual/team/organization/product)
-4. Achievement description
 
 Ask naturally and conversationally. ONE question at a time. Keep it SHORT (1-2 sentences).`;
       } else {
@@ -246,7 +244,7 @@ ${historySummary}
 
 THEY SAID: "${message}"
 
-GREAT NEWS: We have all required info (name, email, nomination subject, description)!
+PERFECT! We have all required info (name, email, nomination subject)!
 
 Respond with: "Perfect! Let me find the best matching categories for you." 
 

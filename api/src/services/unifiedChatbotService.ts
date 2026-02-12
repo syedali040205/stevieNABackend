@@ -424,20 +424,32 @@ export class UnifiedChatbotService {
         };
 
         try {
+          // Build a proper description from conversation if missing
+          let description = userContext.description;
+          if (!description || description.length < 20) {
+            // Build from conversation history
+            const userMessages = conversationHistory
+              .filter(m => m.role === 'user')
+              .map(m => m.content)
+              .join(' ');
+            description = userMessages || 'Seeking award category recommendations';
+          }
+
           // Fill in smart defaults for missing required fields
           const contextForRecommendations = {
             ...userContext,
+            description: description,
             // Smart defaults if fields are missing
             org_type: userContext.org_type || 'for_profit',
-            org_size: userContext.org_size || 'small', // Changed to small for startups/teams
-            achievement_focus: userContext.achievement_focus || ['Innovation', 'Technology', 'Product Development', 'Artificial Intelligence', 'Consumer Products']
+            org_size: userContext.org_size || 'small',
+            achievement_focus: userContext.achievement_focus || ['Innovation', 'Technology', 'Product Development']
           };
 
           logger.info('recommendation_context', contextForRecommendations);
 
           const recommendations = await recommendationEngine.generateRecommendations(
             contextForRecommendations as any,
-            { limit: 15, includeExplanations: true } // Increased limit
+            { limit: 15, includeExplanations: true }
           );
 
           yield {
@@ -580,14 +592,12 @@ export class UnifiedChatbotService {
       messageLower.includes('ok') ||
       messageLower.includes('okay');
 
-    // Check if we have minimum required fields for recommendations
-    // Need: user_name, user_email, nomination_subject, and description
+    // ONLY require: name, email, nomination_subject
+    // Description is optional - we can generate recommendations without it
     const hasMinimumInfo = !!(
       context.user_name &&
       context.user_email &&
-      context.nomination_subject &&
-      context.description &&
-      context.description.length > 20
+      context.nomination_subject
     );
 
     logger.info('recommendation_check', {
@@ -595,14 +605,11 @@ export class UnifiedChatbotService {
       has_minimum: hasMinimumInfo,
       has_name: !!context.user_name,
       has_email: !!context.user_email,
-      nomination_subject: context.nomination_subject,
-      has_description: !!context.description,
-      description_length: context.description?.length || 0,
+      has_nomination_subject: !!context.nomination_subject,
       message: message.substring(0, 50)
     });
 
-    // If user is asking AND we have minimum info, generate recommendations
-    // We'll use smart defaults for missing fields
+    // If user is asking AND we have minimum info (name, email, subject), generate recommendations
     if (askingForRecommendations && hasMinimumInfo) {
       return true;
     }

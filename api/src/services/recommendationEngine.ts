@@ -134,10 +134,38 @@ export class RecommendationEngine {
 
       // Step 4: Perform similarity search with geography and nomination_subject filters
       logger.info('step_3_similarity_search');
+      
+      // Map nomination_subject to match database values
+      // Database has: 'company', 'product' (not 'individual', 'team', 'organization')
+      let dbNominationSubject = context.nomination_subject;
+      if (context.nomination_subject === 'individual' || context.nomination_subject === 'team') {
+        // Individual/team nominations can match product or company categories
+        dbNominationSubject = 'product'; // Default to product for innovation/tech achievements
+        logger.info('mapped_nomination_subject', { 
+          from: context.nomination_subject, 
+          to: dbNominationSubject 
+        });
+      } else if (context.nomination_subject === 'organization') {
+        dbNominationSubject = 'company';
+        logger.info('mapped_nomination_subject', { 
+          from: context.nomination_subject, 
+          to: dbNominationSubject 
+        });
+      }
+      
+      // Geography filter - make it optional if not USA
+      const dbGeography = context.geography === 'usa' ? 'USA' : undefined;
+      if (context.geography && context.geography !== 'usa') {
+        logger.warn('geography_not_usa_skipping_filter', { 
+          geography: context.geography,
+          note: 'Database only has USA categories'
+        });
+      }
+      
       const similarityResults = await this.embeddingMgr.performSimilaritySearch(
         userEmbedding,
-        context.geography, // Pass geography for database-side filtering
-        context.nomination_subject, // Pass nomination_subject for database-side filtering
+        dbGeography, // Pass undefined for non-USA to skip geography filter
+        dbNominationSubject, // Pass mapped nomination subject
         limit
       );
 
