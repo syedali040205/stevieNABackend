@@ -132,11 +132,12 @@ export class RecommendationEngine {
         dimension: userEmbedding.length,
       });
 
-      // Step 4: Perform similarity search with geography filter
+      // Step 4: Perform similarity search with geography and nomination_subject filters
       logger.info('step_3_similarity_search');
       const similarityResults = await this.embeddingMgr.performSimilaritySearch(
         userEmbedding,
         context.geography, // Pass geography for database-side filtering
+        context.nomination_subject, // Pass nomination_subject for database-side filtering
         limit
       );
 

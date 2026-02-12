@@ -246,26 +246,29 @@ Create a concise, descriptive search query (2-3 sentences) that captures the ess
 
   /**
    * Perform similarity search using pgvector.
-   * Optionally filters by geography in the database.
+   * Optionally filters by geography and nomination_subject in the database.
    */
   async performSimilaritySearch(
     userEmbedding: number[],
     userGeography?: string,
+    userNominationSubject?: string,
     limit: number = 10,
   ): Promise<SimilarityResult[]> {
     logger.info("performing_similarity_search", {
       user_geography: userGeography || "all",
+      user_nomination_subject: userNominationSubject || "all",
       limit: limit,
       embedding_dimension: userEmbedding.length,
     });
 
     try {
-      // Call updated function with geography parameter
+      // Call updated function with geography and nomination_subject parameters
       const { data, error } = await this.client.rpc(
         "search_similar_categories",
         {
           query_embedding: userEmbedding,
           user_geography: userGeography || null,
+          user_nomination_subject: userNominationSubject || null,
           match_limit: limit,
         },
       );
