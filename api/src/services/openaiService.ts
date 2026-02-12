@@ -100,7 +100,7 @@ export class OpenAIService {
   /**
    * Generate embedding for text
    */
-  async generateEmbedding(text: string, model = 'text-embedding-3-small'): Promise<number[]> {
+  async generateEmbedding(text: string, model = 'text-embedding-ada-002'): Promise<number[]> {
     try {
       const response = await this.client.embeddings.create({
         model,
@@ -122,7 +122,7 @@ export class OpenAIService {
    */
   async generateEmbeddings(
     texts: string[],
-    model = 'text-embedding-3-small'
+    model = 'text-embedding-ada-002'
   ): Promise<number[][]> {
     try {
       // OpenAI supports batch embedding (up to 2048 inputs)

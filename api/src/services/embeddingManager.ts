@@ -50,7 +50,7 @@ export class EmbeddingManager {
   constructor(client?: SupabaseClient) {
     this.client = client || getSupabaseClient();
     this.embeddingModel =
-      process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+      process.env.EMBEDDING_MODEL || "text-embedding-ada-002";
   }
 
   /**
