@@ -1,6 +1,6 @@
 import { sqlFilterEngine, SQLFilterEngine } from './sqlFilterEngine';
 import { embeddingManager, EmbeddingManager } from './embeddingManager';
-import { aiServiceClient } from './aiServiceClient';
+import { explanationGenerator } from './explanationGenerator';
 import { getSupabaseClient } from '../config/supabase';
 import logger from '../utils/logger';
 
@@ -173,15 +173,15 @@ export class RecommendationEngine {
       if (includeExplanations && recommendations.length > 0) {
         logger.info('step_4_generating_explanations');
         try {
-          const explanationsResponse = await aiServiceClient.generateExplanations(
-            context,
-            recommendations.map((rec) => ({
+          const explanationsResponse = await explanationGenerator.generateExplanations({
+            userContext: context,
+            categories: recommendations.map((rec) => ({
               category_id: rec.category_id,
               category_name: rec.category_name,
               description: rec.description,
               program_name: rec.program_name,
-            }))
-          );
+            })),
+          });
 
           // Merge explanations into recommendations
           const explanationsMap = new Map(
