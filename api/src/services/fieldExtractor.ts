@@ -14,6 +14,8 @@ Your job is to extract structured information from the user's message and return
 
 ## Fields to extract:
 
+- **user_name**: User's full name (string)
+- **user_email**: User's email address (string, must be valid email format)
 - **nomination_subject**: What they're nominating (values: "individual", "team", "organization", "product")
 - **description**: Description of the achievement or nomination (string, 20-500 chars)
 - **org_type**: Organization type (values: "for_profit", "non_profit", "government", "startup")
@@ -27,8 +29,12 @@ Your job is to extract structured information from the user's message and return
 3. Return ONLY the fields you found - omit fields you didn't find
 4. For achievement_focus, extract multiple areas if mentioned
 5. Keep descriptions concise but informative
+6. For user_email, validate it's a proper email format (contains @ and domain)
 
 ## Examples:
+
+User: "My name is John Smith and my email is john@company.com"
+→ {"user_name":"John Smith","user_email":"john@company.com"}
 
 User: "I want to nominate our team for winning the innovation award"
 → {"nomination_subject":"team","achievement_focus":["Innovation"]}
@@ -92,6 +98,12 @@ export class FieldExtractor {
   private buildUserPrompt(message: string, userContext: any): string {
     const contextParts: string[] = [];
 
+    if (userContext.user_name) {
+      contextParts.push(`Already know user_name: ${userContext.user_name}`);
+    }
+    if (userContext.user_email) {
+      contextParts.push(`Already know user_email: ${userContext.user_email}`);
+    }
     if (userContext.nomination_subject) {
       contextParts.push(`Already know nomination_subject: ${userContext.nomination_subject}`);
     }
@@ -135,6 +147,23 @@ Extract any new fields from this message.`;
 
       // Validate and clean extracted fields
       const cleaned: Record<string, any> = {};
+
+      // user_name
+      if (result.user_name && typeof result.user_name === 'string') {
+        const name = result.user_name.trim();
+        if (name.length >= 2 && name.length <= 100) {
+          cleaned.user_name = name;
+        }
+      }
+
+      // user_email
+      if (result.user_email && typeof result.user_email === 'string') {
+        const email = result.user_email.trim().toLowerCase();
+        // Basic email validation
+        if (email.includes('@') && email.includes('.') && email.length >= 5) {
+          cleaned.user_email = email;
+        }
+      }
 
       // nomination_subject
       if (result.nomination_subject) {

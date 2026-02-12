@@ -101,7 +101,16 @@ IMPORTANT:
 - Keep responses SHORT and conversational
 - Let the conversation flow naturally`;
 
-    if (intentType === 'question') {
+    if (intentType === 'recommendation') {
+      return basePrompt + `
+
+RIGHT NOW: They want category recommendations.
+- Great! Let's help them find the right categories
+- First, check if you have: their name, email, what they're nominating, and the achievement story
+- If missing any of these, ask for them naturally (one at a time, not all at once)
+- Once you have the basics, I'll generate personalized category recommendations
+- Keep it conversational and encouraging`;
+    } else if (intentType === 'question') {
       return basePrompt + `
 
 RIGHT NOW: They asked a question.
