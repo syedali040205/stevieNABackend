@@ -1,9 +1,15 @@
 import { getSupabaseClient } from '../config/supabase';
-import axios from 'axios';
 import logger from '../utils/logger';
 import { SessionManager } from './sessionManager';
 import { userProfileManager } from './userProfileManager';
 import { recommendationEngine } from './recommendationEngine';
+import { cacheManager } from './cacheManager';
+import { pineconeClient } from './pineconeClient';
+import { openaiService } from './openaiService';
+import { intentClassifier } from './intentClassifier';
+import { conversationManager } from './conversationManager';
+import { fieldExtractor } from './fieldExtractor';
+import crypto from 'crypto';
 
 /**
  * Unified Chatbot Service
@@ -22,6 +28,25 @@ import { recommendationEngine } from './recommendationEngine';
 export class UnifiedChatbotService {
   private supabase = getSupabaseClient();
   private sessionManager = new SessionManager();
+  private readonly KB_CACHE_PREFIX = 'kb_search:';
+  private readonly KB_CACHE_TTL = 3600; // 1 hour (KB articles rarely change)
+
+  /**
+   * Generate cache key for KB search
+   * Normalizes the query to improve cache hit rate
+   */
+  private getKBCacheKey(message: string): string {
+    // Normalize: lowercase, trim, remove extra spaces, remove punctuation
+    const normalized = message
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[^\w\s]/g, '');
+    
+    // Hash the normalized query for consistent key length
+    const hash = crypto.createHash('md5').update(normalized).digest('hex');
+    return `${this.KB_CACHE_PREFIX}${hash}`;
+  }
 
   /**
    * Manually enrich context from conversation as workaround for weak field extraction.
@@ -305,9 +330,13 @@ export class UnifiedChatbotService {
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
 
-      // Step 2: Classify intent (Python)
+      // Step 2: Classify intent (Node.js - no Python hop!)
       logger.info('step_1_classifying_intent');
-      const intent = await this.classifyIntent(message, conversationHistory, userContext);
+      const intent = await intentClassifier.classifyIntent({
+        message,
+        conversationHistory,
+        userContext,
+      });
 
       logger.info('intent_classified', {
         intent: intent.intent,
@@ -335,10 +364,10 @@ export class UnifiedChatbotService {
 
       // Step 3.5: Extract fields and enrich context BEFORE generating response
       logger.info('step_3_extracting_fields');
-      const extractedFields = await this.extractFieldsFromMessage(
+      const extractedFields = await fieldExtractor.extractFields({
         message,
-        userContext
-      );
+        userContext,
+      });
 
       // Log detailed extraction results
       logger.info('extracted_fields_detail', {
@@ -371,14 +400,20 @@ export class UnifiedChatbotService {
       // Manual context enrichment as workaround for weak field extraction
       userContext = this.enrichContextFromConversation(userContext, message, conversationHistory);
 
-      // Step 4: Generate response (Python, streaming) with enriched context
+      // Step 4: Generate response (Node.js streaming) with enriched context
       logger.info('step_4_generating_response');
-      yield* this.generateResponseStream(
+      for await (const chunk of conversationManager.generateResponseStream({
         message,
+        intent,
         conversationHistory,
         userContext,
-        kbArticles
-      );
+        kbArticles,
+      })) {
+        yield {
+          type: 'chunk',
+          content: chunk,
+        };
+      }
 
       // Step 5: Check if ready for recommendations
       if (this.shouldGenerateRecommendations(userContext, message)) {
@@ -453,76 +488,56 @@ export class UnifiedChatbotService {
     }
   }
 
-  /**
-   * Classify user intent using Python AI service.
-   */
-  private async classifyIntent(
-    message: string,
-    conversationHistory: any[],
-    userContext: any
-  ): Promise<{
-    intent: string;
-    confidence: number;
-    reasoning: string;
-  }> {
-    try {
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      const apiKey = process.env.INTERNAL_API_KEY || '';
-
-      const response = await axios.post(
-        `${aiServiceUrl}/api/unified/classify-intent`,
-        {
-          message: message,
-          session_id: 'temp',  // Not used in classification
-          conversation_history: conversationHistory,
-          user_context: userContext,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-          },
-          timeout: 30000,
-        }
-      );
-
-      return response.data;
-    } catch (error: any) {
-      logger.error('intent_classification_error', {
-        error: error.message,
-        status: error.response?.status,
-      });
-      
-      // Fallback: default to information intent
-      return {
-        intent: 'information',
-        confidence: 0.5,
-        reasoning: 'Classification failed, defaulting to information intent',
-      };
-    }
-  }
+  // Intent classification moved to intentClassifier service
 
   /**
-   * Search KB articles using pgvector similarity.
+   * Search KB articles using Pinecone with Redis caching.
+   * Cache key is based on normalized query to maximize cache hits.
    */
   private async searchKB(message: string): Promise<any[]> {
+    const cacheKey = this.getKBCacheKey(message);
+
     try {
-      // Generate embedding for message
-      const embedding = await this.generateEmbedding(message);
-
-      // Search KB
-      const { data, error } = await this.supabase.rpc('search_similar_content', {
-        query_embedding: embedding,
-        content_type_filter: 'kb_article',
-        match_limit: 5,
-        match_threshold: 0.5,
-      });
-
-      if (error) {
-        throw new Error(`KB search failed: ${error.message}`);
+      // Try cache first
+      const cachedResults = await cacheManager.get<any[]>(cacheKey);
+      if (cachedResults) {
+        logger.info('kb_search_cache_hit', { 
+          message: message.substring(0, 50),
+          results_count: cachedResults.length 
+        });
+        return cachedResults;
       }
 
-      return (data || []) as any[];
+      logger.debug('kb_search_cache_miss', { message: message.substring(0, 50) });
+
+      // Cache miss - generate embedding and search Pinecone
+      const embedding = await openaiService.generateEmbedding(message);
+
+      // Search Pinecone
+      const pineconeResults = await pineconeClient.query(
+        embedding,
+        5,
+        { content_type: 'kb_article' }
+      );
+
+      // Transform Pinecone results to expected format
+      const results = pineconeResults.map(r => ({
+        id: r.metadata.document_id,
+        title: r.metadata.title || 'Untitled',
+        content: r.metadata.chunk_text || '',
+        program: r.metadata.program || 'general',
+        similarity: r.score,
+      }));
+
+      // Cache the results
+      await cacheManager.set(cacheKey, results, this.KB_CACHE_TTL);
+      
+      logger.info('kb_search_completed_and_cached', { 
+        message: message.substring(0, 50),
+        results_count: results.length 
+      });
+
+      return results;
     } catch (error: any) {
       logger.error('kb_search_error', {
         error: error.message,
@@ -532,158 +547,11 @@ export class UnifiedChatbotService {
     }
   }
 
-  /**
-   * Generate embedding for text using Python AI service.
-   */
-  private async generateEmbedding(text: string): Promise<number[]> {
-    try {
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      const apiKey = process.env.INTERNAL_API_KEY || '';
+  // Embedding generation moved to openaiService
 
-      const response = await axios.post(
-        `${aiServiceUrl}/api/generate-embedding`,
-        {
-          text: text,
-          model: 'text-embedding-3-small',
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-          },
-          timeout: 30000,
-        }
-      );
+  // Response generation moved to conversationManager service
 
-      return response.data.embedding;
-    } catch (error: any) {
-      logger.error('embedding_generation_error', {
-        error: error.message,
-        status: error.response?.status,
-      });
-      throw new Error(`Failed to generate embedding: ${error.message}`);
-    }
-  }
-
-  /**
-   * Generate response using Python AI service with streaming.
-   */
-  private async *generateResponseStream(
-    message: string,
-    conversationHistory: any[],
-    userContext: any,
-    kbArticles: any[] | null
-  ): AsyncGenerator<any, void, unknown> {
-    try {
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      const apiKey = process.env.INTERNAL_API_KEY || '';
-
-      const response = await axios.post(
-        `${aiServiceUrl}/api/unified/chat`,
-        {
-          message: message,
-          session_id: 'temp',  // Not used in generation
-          conversation_history: conversationHistory,
-          user_context: userContext,
-          kb_articles: kbArticles,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-          },
-          responseType: 'stream',
-          timeout: 60000,
-        }
-      );
-
-      // Parse SSE stream
-      const stream = response.data;
-      let buffer = '';
-
-      stream.setEncoding('utf8');
-
-      for await (const chunk of stream) {
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              // Skip intent events (already sent)
-              if (data.type !== 'intent') {
-                yield data;
-              }
-            } catch (parseError: any) {
-              logger.error('sse_parse_error', {
-                line: line.substring(0, 100),
-                error: parseError.message,
-              });
-            }
-          }
-        }
-      }
-
-      // Process remaining buffer
-      if (buffer.trim() && buffer.startsWith('data: ')) {
-        try {
-          const data = JSON.parse(buffer.slice(6));
-          if (data.type !== 'intent') {
-            yield data;
-          }
-        } catch (parseError: any) {
-          logger.error('sse_final_parse_error', { error: parseError.message });
-        }
-      }
-    } catch (error: any) {
-      logger.error('response_stream_error', {
-        error: error.message,
-        status: error.response?.status,
-      });
-      throw new Error(`Failed to stream response: ${error.message}`);
-    }
-  }
-
-  /**
-   * Extract fields from user message using Python AI service.
-   */
-  private async extractFieldsFromMessage(
-    message: string,
-    userContext: any
-  ): Promise<any> {
-    try {
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      const apiKey = process.env.INTERNAL_API_KEY || '';
-
-      const response = await axios.post(
-        `${aiServiceUrl}/api/extract-fields`,
-        {
-          user_context: userContext,
-          user_message: message,
-          conversation_state: 'collecting'
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-          },
-          timeout: 30000,
-        }
-      );
-
-      return response.data.extracted_fields || {};
-    } catch (error: any) {
-      logger.error('field_extraction_error', {
-        error: error.message,
-        status: error.response?.status,
-      });
-      // Return empty object on error (graceful degradation)
-      return {};
-    }
-  }
+  // Field extraction moved to fieldExtractor service
 
   /**
    * Check if we should generate recommendations based on context and message.
@@ -741,6 +609,17 @@ export class UnifiedChatbotService {
     }
 
     return false;
+  }
+
+  /**
+   * Invalidate all KB search caches
+   * Call this when KB articles are updated/added/deleted
+   */
+  async invalidateKBCache(): Promise<number> {
+    const pattern = `${this.KB_CACHE_PREFIX}*`;
+    const deletedCount = await cacheManager.deletePattern(pattern);
+    logger.info('kb_cache_invalidated', { count: deletedCount });
+    return deletedCount;
   }
 }
 

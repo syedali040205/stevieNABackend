@@ -14,6 +14,9 @@
     "test-kb-search": "tsx --env-file=.env test-kb-search.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.985.0",
+    "@aws-sdk/s3-request-presigner": "^3.985.0",
+    "@pinecone-database/pinecone": "^7.0.0",
     "@supabase/supabase-js": "^2.39.0",
     "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.17",
@@ -27,7 +30,12 @@
     "express": "^4.18.2",
     "express-rate-limit": "^8.2.1",
     "helmet": "^7.1.0",
+    "ioredis": "^5.9.2",
+    "mammoth": "^1.11.0",
+    "multer": "^2.0.2",
+    "openai": "^4.77.0",
     "opossum": "^9.0.0",
+    "pdf-parse": "^2.4.5",
     "prom-client": "^15.1.0",
     "typescript": "^5.3.3",
     "winston": "^3.11.0",
@@ -35,6 +43,8 @@
   },
   "devDependencies": {
     "@types/jest": "^29.5.11",
+    "@types/multer": "^2.0.0",
+    "@types/pdf-parse": "^1.1.5",
     "@types/supertest": "^6.0.2",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",

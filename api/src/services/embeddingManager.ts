@@ -1,7 +1,7 @@
-import { getSupabaseClient } from '../config/supabase';
-import { SupabaseClient } from '@supabase/supabase-js';
-import axios from 'axios';
-import logger from '../utils/logger';
+import { getSupabaseClient } from "../config/supabase";
+import { SupabaseClient } from "@supabase/supabase-js";
+import axios from "axios";
+import logger from "../utils/logger";
 
 interface UserContext {
   geography?: string;
@@ -49,7 +49,8 @@ export class EmbeddingManager {
 
   constructor(client?: SupabaseClient) {
     this.client = client || getSupabaseClient();
-    this.embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
+    this.embeddingModel =
+      process.env.EMBEDDING_MODEL || "text-embedding-3-small";
   }
 
   /**
@@ -63,21 +64,24 @@ export class EmbeddingManager {
     parts.push(`${category.category_name}. ${category.description}.`);
 
     // Eligible organization types
-    if (category.applicable_org_types && category.applicable_org_types.length > 0) {
-      const orgTypes = category.applicable_org_types.join(', ');
+    if (
+      category.applicable_org_types &&
+      category.applicable_org_types.length > 0
+    ) {
+      const orgTypes = category.applicable_org_types.join(", ");
       parts.push(`Eligible for ${orgTypes}.`);
     }
 
     // Focus areas
     if (category.achievement_focus && category.achievement_focus.length > 0) {
-      const focusAreas = category.achievement_focus.join(', ');
+      const focusAreas = category.achievement_focus.join(", ");
       parts.push(`Focus areas: ${focusAreas}.`);
     }
 
     // Program name
     parts.push(`Program: ${category.program_name}.`);
 
-    return parts.join(' ');
+    return parts.join(" ");
   }
 
   /**
@@ -94,65 +98,73 @@ export class EmbeddingManager {
 
     // 2. FOCUS AREAS (critical for matching relevant categories)
     if (context.achievement_focus && context.achievement_focus.length > 0) {
-      const focusAreas = context.achievement_focus.join(', ');
+      const focusAreas = context.achievement_focus.join(", ");
       parts.push(`Focus areas: ${focusAreas}.`);
     }
 
     // 3. Nomination subject with context
     if (context.nomination_subject) {
       const subjectContext: Record<string, string> = {
-        'product': 'Nominating a product or service',
-        'organization': 'Nominating an entire organization',
-        'team': 'Nominating a team or department',
-        'individual': 'Nominating an individual person'
+        product: "Nominating a product or service",
+        organization: "Nominating an entire organization",
+        team: "Nominating a team or department",
+        individual: "Nominating an individual person",
       };
-      parts.push(subjectContext[context.nomination_subject] || `Nominating: ${context.nomination_subject}.`);
+      parts.push(
+        subjectContext[context.nomination_subject] ||
+          `Nominating: ${context.nomination_subject}.`,
+      );
     }
 
     // 4. Organization context (less important for semantic matching)
     const orgDetails: string[] = [];
     if (context.org_type) {
       const orgTypeLabels: Record<string, string> = {
-        'for_profit': 'For-profit organization',
-        'non_profit': 'Non-profit organization',
-        'government': 'Government organization'
+        for_profit: "For-profit organization",
+        non_profit: "Non-profit organization",
+        government: "Government organization",
+        education: "Educational institution",
       };
       orgDetails.push(orgTypeLabels[context.org_type] || context.org_type);
     }
     if (context.org_size) {
       const sizeLabels: Record<string, string> = {
-        'small': 'Small organization (up to 100 employees)',
-        'medium': 'Medium organization (101-2,500 employees)',
-        'large': 'Large organization (2,501+ employees)'
+        small: "Small organization (up to 100 employees)",
+        medium: "Medium organization (101-2,500 employees)",
+        large: "Large organization (2,501+ employees)",
       };
       orgDetails.push(sizeLabels[context.org_size] || context.org_size);
     }
     if (orgDetails.length > 0) {
-      parts.push(orgDetails.join(', ') + '.');
+      parts.push(orgDetails.join(", ") + ".");
     }
 
     // 5. Tech orientation (helps distinguish tech vs non-tech categories)
     if (context.tech_orientation) {
       const techLabels: Record<string, string> = {
-        'tech_company': 'Technology company',
-        'tech_user': 'Technology user',
-        'non_tech': 'Non-technology focused'
+        tech_company: "Technology company",
+        tech_user: "Technology user",
+        non_tech: "Non-technology focused",
       };
-      parts.push(techLabels[context.tech_orientation] || context.tech_orientation + '.');
+      parts.push(
+        techLabels[context.tech_orientation] || context.tech_orientation + ".",
+      );
     }
 
     // 6. Operating scope
     if (context.operating_scope) {
       const scopeLabels: Record<string, string> = {
-        'local': 'Local operations',
-        'regional': 'Regional operations',
-        'national': 'National operations',
-        'international': 'International operations'
+        local: "Local operations",
+        regional: "Regional operations",
+        national: "National operations",
+        international: "International operations",
       };
-      parts.push(scopeLabels[context.operating_scope] || context.operating_scope + '.');
+      parts.push(
+        scopeLabels[context.operating_scope] || context.operating_scope + ".",
+      );
     }
 
-    return parts.join(' ');
+    return parts.join(" ");
   }
 
   /**
@@ -160,14 +172,15 @@ export class EmbeddingManager {
    * Python handles the OpenAI API call.
    */
   async generateEmbedding(text: string): Promise<number[]> {
-    logger.info('generating_embedding', {
+    logger.info("generating_embedding", {
       text_length: text.length,
       model: this.embeddingModel,
     });
 
     try {
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      const apiKey = process.env.INTERNAL_API_KEY || '';
+      const aiServiceUrl =
+        process.env.AI_SERVICE_URL || "http://localhost:8000";
+      const apiKey = process.env.INTERNAL_API_KEY || "";
 
       const response = await axios.post(
         `${aiServiceUrl}/api/generate-embedding`,
@@ -177,23 +190,23 @@ export class EmbeddingManager {
         },
         {
           headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
           },
           timeout: 30000,
-        }
+        },
       );
 
       const embedding = response.data.embedding;
 
-      logger.info('embedding_generated', {
+      logger.info("embedding_generated", {
         dimension: embedding.length,
-        tokens_used: response.data.tokens_used || 'unknown',
+        tokens_used: response.data.tokens_used || "unknown",
       });
 
       return embedding;
     } catch (error: any) {
-      logger.error('embedding_generation_error', {
+      logger.error("embedding_generation_error", {
         error: error.message,
         status: error.response?.status,
       });
@@ -208,7 +221,7 @@ export class EmbeddingManager {
   async generateUserEmbedding(context: UserContext): Promise<number[]> {
     // Use LLM to generate natural search query
     const queryText = await this.generateSearchQuery(context);
-    logger.info('generated_search_query', {
+    logger.info("generated_search_query", {
       text: queryText,
       context: context,
     });
@@ -221,24 +234,25 @@ export class EmbeddingManager {
    */
   private async generateSearchQuery(context: UserContext): Promise<string> {
     try {
-      const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-      const apiKey = process.env.INTERNAL_API_KEY || '';
+      const aiServiceUrl =
+        process.env.AI_SERVICE_URL || "http://localhost:8000";
+      const apiKey = process.env.INTERNAL_API_KEY || "";
 
       const response = await axios.post(
         `${aiServiceUrl}/api/generate-search-query`,
         { context },
         {
           headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
           },
           timeout: 10000,
-        }
+        },
       );
 
       return response.data.query;
     } catch (error: any) {
-      logger.warn('search_query_generation_failed_using_fallback', {
+      logger.warn("search_query_generation_failed_using_fallback", {
         error: error.message,
       });
       // Fallback to manual formatting if LLM fails
@@ -253,49 +267,54 @@ export class EmbeddingManager {
   async performSimilaritySearch(
     userEmbedding: number[],
     userGeography?: string,
-    limit: number = 10
+    limit: number = 10,
   ): Promise<SimilarityResult[]> {
-    logger.info('performing_similarity_search', {
-      user_geography: userGeography || 'all',
+    logger.info("performing_similarity_search", {
+      user_geography: userGeography || "all",
       limit: limit,
       embedding_dimension: userEmbedding.length,
     });
 
     try {
       // Call updated function with geography parameter
-      const { data, error } = await this.client.rpc('search_similar_categories', {
-        query_embedding: userEmbedding,
-        user_geography: userGeography || null,
-        match_limit: limit,
-      });
+      const { data, error } = await this.client.rpc(
+        "search_similar_categories",
+        {
+          query_embedding: userEmbedding,
+          user_geography: userGeography || null,
+          match_limit: limit,
+        },
+      );
 
       if (error) {
-        logger.error('similarity_search_error', {
+        logger.error("similarity_search_error", {
           error: error.message,
           code: error.code,
         });
-        throw new Error(`Failed to perform similarity search: ${error.message}`);
+        throw new Error(
+          `Failed to perform similarity search: ${error.message}`,
+        );
       }
 
-      logger.info('similarity_search_complete', {
+      logger.info("similarity_search_complete", {
         results_count: data?.length || 0,
       });
 
       // Log detailed similarity scores for analysis
       if (data && data.length > 0) {
-        logger.info('similarity_results_detail', {
+        logger.info("similarity_results_detail", {
           top_results: data.slice(0, 5).map((r: any) => ({
             category: r.category_name,
             score: Math.round(r.similarity_score * 1000) / 1000,
             focus: r.achievement_focus,
-            program: r.program_name
-          }))
+            program: r.program_name,
+          })),
         });
       }
 
       return (data || []) as SimilarityResult[];
     } catch (error: any) {
-      logger.error('similarity_search_exception', {
+      logger.error("similarity_search_exception", {
         error: error.message,
       });
       throw error;
@@ -307,7 +326,7 @@ export class EmbeddingManager {
    * Used during data ingestion.
    */
   async precomputeCategoryEmbedding(category: Category): Promise<void> {
-    logger.info('precomputing_category_embedding', {
+    logger.info("precomputing_category_embedding", {
       category_id: category.category_id,
       category_name: category.category_name,
     });
@@ -320,25 +339,25 @@ export class EmbeddingManager {
       const embedding = await this.generateEmbedding(categoryText);
 
       // Store in database
-      const { error } = await this.client.from('category_embeddings').upsert({
+      const { error } = await this.client.from("category_embeddings").upsert({
         category_id: category.category_id,
         embedding: embedding,
         embedding_text: categoryText,
       });
 
       if (error) {
-        logger.error('store_embedding_error', {
+        logger.error("store_embedding_error", {
           error: error.message,
           category_id: category.category_id,
         });
         throw new Error(`Failed to store embedding: ${error.message}`);
       }
 
-      logger.info('category_embedding_stored', {
+      logger.info("category_embedding_stored", {
         category_id: category.category_id,
       });
     } catch (error: any) {
-      logger.error('precompute_embedding_exception', {
+      logger.error("precompute_embedding_exception", {
         error: error.message,
         category_id: category.category_id,
       });
