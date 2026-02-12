@@ -215,7 +215,7 @@ export class EmbeddingManager {
   private async generateSearchQuery(context: UserContext): Promise<string> {
     try {
       // Use Node.js OpenAI service to generate search query
-      const prompt = `Generate a natural language search query for finding award categories based on this context:
+      const prompt = `Generate a focused search query for finding award categories based on this context:
 
 Description: ${context.description || 'Not provided'}
 Focus Areas: ${context.achievement_focus?.join(', ') || 'Not specified'}
@@ -223,11 +223,17 @@ Nominating: ${context.nomination_subject || 'Not specified'}
 Organization Type: ${context.org_type || 'Not specified'}
 Organization Size: ${context.org_size || 'Not specified'}
 
-Create a concise, descriptive search query (2-3 sentences) that captures the essence of this nomination.`;
+Create a search query (2-3 sentences) that emphasizes:
+1. The specific product/innovation/achievement (not just generic "innovation")
+2. The key technologies or focus areas mentioned
+3. The impact or unique value proposition
+4. Relevant industry or domain
+
+Be specific and concrete. Focus on WHAT was built/achieved, not just WHO is being nominated.`;
 
       const query = await openaiService.chatCompletion({
         messages: [
-          { role: 'system', content: 'You are a search query generator. Create natural language queries for finding relevant award categories.' },
+          { role: 'system', content: 'You are a search query generator for award categories. Create specific, concrete queries that emphasize the actual achievement, product, or innovation - not generic terms.' },
           { role: 'user', content: prompt }
         ],
         temperature: 0.3,
