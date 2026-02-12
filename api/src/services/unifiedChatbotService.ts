@@ -233,6 +233,38 @@ export class UnifiedChatbotService {
           job_title: null,
         };
         
+        // Ensure the user exists in the database (for foreign key constraint)
+        if (!userId) {
+          // Anonymous user - ensure the anonymous user record exists
+          const { data: existingAnonymous, error: checkError } = await this.supabase
+            .from('users')
+            .select('id')
+            .eq('id', effectiveUserId)
+            .single();
+          
+          if (checkError || !existingAnonymous) {
+            // Create anonymous user record
+            logger.info('creating_anonymous_user_record');
+            const { error: anonInsertError } = await this.supabase
+              .from('users')
+              .insert({
+                id: effectiveUserId,
+                email: 'anonymous@stevieawards.com',
+                full_name: 'Anonymous User',
+                country: 'Unknown',
+                organization_name: 'Anonymous',
+              })
+              .select()
+              .single();
+            
+            if (anonInsertError && !anonInsertError.message.includes('duplicate key')) {
+              logger.error('failed_to_create_anonymous_user', {
+                error: anonInsertError.message,
+              });
+            }
+          }
+        }
+        
         // If authenticated user, fetch profile and populate context
         if (userId) {
           try {
