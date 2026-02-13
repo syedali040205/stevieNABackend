@@ -6,44 +6,78 @@ import logger from '../utils/logger';
  * 
  * Handles caching for FAQ responses and document metadata.
  * Uses Redis for fast in-memory caching with TTL support.
+ * 
+ * GRACEFUL DEGRADATION: If Redis is unavailable, all operations return null/false
+ * and the system continues without caching.
  */
 export class CacheManager {
-  private redis: Redis;
+  private redis: Redis | null = null;
   private defaultTTL: number = 3600; // 1 hour default
+  private redisAvailable: boolean = false;
 
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     const redisPassword = process.env.REDIS_PASSWORD || '';
     const redisDb = parseInt(process.env.REDIS_DB || '0', 10);
 
+    // Skip Redis initialization if URL is not set or is localhost (production without Redis)
+    if (!process.env.REDIS_URL || redisUrl.includes('localhost')) {
+      logger.info('redis_disabled', { reason: 'REDIS_URL not set or localhost' });
+      this.redisAvailable = false;
+      return;
+    }
+
     const connectTimeoutMs = parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS || '10000', 10);
     const commandTimeoutMs = parseInt(process.env.REDIS_COMMAND_TIMEOUT_MS || '5000', 10);
 
-    this.redis = new Redis(redisUrl, {
-      password: redisPassword || undefined,
-      db: redisDb,
-      connectTimeout: connectTimeoutMs,
-      commandTimeout: commandTimeoutMs,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
-      maxRetriesPerRequest: 3,
-    });
+    try {
+      this.redis = new Redis(redisUrl, {
+        password: redisPassword || undefined,
+        db: redisDb,
+        connectTimeout: connectTimeoutMs,
+        commandTimeout: commandTimeoutMs,
+        retryStrategy: (times) => {
+          // Stop retrying after 3 attempts
+          if (times > 3) {
+            logger.warn('redis_max_retries_reached', { attempts: times });
+            return null;
+          }
+          const delay = Math.min(times * 50, 2000);
+          return delay;
+        },
+        maxRetriesPerRequest: 3,
+        lazyConnect: true, // Don't connect immediately
+      });
 
-    this.redis.on('connect', () => {
-      logger.info('redis_connected', { url: redisUrl });
-    });
+      this.redis.on('connect', () => {
+        this.redisAvailable = true;
+        logger.info('redis_connected', { url: redisUrl });
+      });
 
-    this.redis.on('error', (error) => {
-      logger.error('redis_error', { error: error.message });
-    });
+      this.redis.on('error', (error) => {
+        this.redisAvailable = false;
+        logger.error('redis_error', { error: error.message });
+      });
+
+      // Try to connect
+      this.redis.connect().catch((error) => {
+        this.redisAvailable = false;
+        logger.warn('redis_connection_failed', { error: error.message });
+      });
+    } catch (error: any) {
+      this.redisAvailable = false;
+      logger.warn('redis_initialization_failed', { error: error.message });
+    }
   }
 
   /**
    * Get cached value by key
    */
   async get<T>(key: string): Promise<T | null> {
+    if (!this.redisAvailable || !this.redis) {
+      return null;
+    }
+    
     try {
       const value = await this.redis.get(key);
       if (!value) {
@@ -60,6 +94,10 @@ export class CacheManager {
    * Set cached value with TTL
    */
   async set(key: string, value: any, ttl?: number): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+    
     try {
       const serialized = JSON.stringify(value);
       const expiry = ttl || this.defaultTTL;
@@ -75,6 +113,10 @@ export class CacheManager {
    * Delete cached value
    */
   async delete(key: string): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+    
     try {
       await this.redis.del(key);
       return true;
@@ -89,6 +131,10 @@ export class CacheManager {
    * Uses SCAN (cursor-based) instead of KEYS to avoid blocking Redis at scale.
    */
   async deletePattern(pattern: string): Promise<number> {
+    if (!this.redisAvailable || !this.redis) {
+      return 0;
+    }
+    
     try {
       const keys: string[] = [];
       const stream = this.redis.scanStream({
@@ -117,6 +163,10 @@ export class CacheManager {
    * Check if key exists
    */
   async exists(key: string): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+    
     try {
       const result = await this.redis.exists(key);
       return result === 1;
@@ -130,6 +180,10 @@ export class CacheManager {
    * Get remaining TTL for key
    */
   async ttl(key: string): Promise<number> {
+    if (!this.redisAvailable || !this.redis) {
+      return -1;
+    }
+    
     try {
       return await this.redis.ttl(key);
     } catch (error: any) {
@@ -143,6 +197,10 @@ export class CacheManager {
    * Used for rate limiting (fixed window).
    */
   async incr(key: string): Promise<number> {
+    if (!this.redisAvailable || !this.redis) {
+      return 0;
+    }
+    
     try {
       return await this.redis.incr(key);
     } catch (error: any) {
@@ -155,6 +213,10 @@ export class CacheManager {
    * Set TTL on a key (seconds).
    */
   async expire(key: string, seconds: number): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+    
     try {
       const result = await this.redis.expire(key, seconds);
       return !!result;
@@ -168,13 +230,19 @@ export class CacheManager {
    * Close Redis connection
    */
   async close(): Promise<void> {
-    await this.redis.quit();
+    if (this.redis) {
+      await this.redis.quit();
+    }
   }
 
   /**
    * Health check
    */
   async healthCheck(): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+    
     try {
       const result = await this.redis.ping();
       return result === 'PONG';
