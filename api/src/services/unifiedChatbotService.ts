@@ -6,10 +6,9 @@ import { recommendationEngine } from './recommendationEngine';
 import { cacheManager } from './cacheManager';
 import { pineconeClient } from './pineconeClient';
 import { openaiService } from './openaiService';
-import { intentClassifier } from './intentClassifier';
+import { contextClassifier } from './contextClassifier';
 import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
-import { getFirstMissingStep } from './demographicQuestions';
 import crypto from 'crypto';
 
 /**
@@ -350,62 +349,31 @@ export class UnifiedChatbotService {
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
 
-      // Step 2: Classify intent (Node.js - no Python hop!)
-      logger.info('step_1_classifying_intent');
-      let intent = await intentClassifier.classifyIntent({
+      // Step 2: Classify context (recommendation vs qa)
+      logger.info('step_1_classifying_context');
+      const context = await contextClassifier.classifyContext({
         message,
         conversationHistory,
+        currentContext: undefined, // Context is determined dynamically, not stored in session
         userContext,
       });
 
-      // Intent locking: if we're in the middle of collecting demographics for recommendations,
-      // stay in that flow. Don't switch to "question" (KB search) when the user is answering
-      // our demographic questions (e.g. "team", "product", "company").
-      const nextMissing = getFirstMissingStep(userContext, true);
-      const hasAnyDemographic =
-        !!(userContext.user_name || userContext.user_email || userContext.geography || userContext.nomination_subject);
-      const lastAssistantMessage = conversationHistory
-        .filter((m) => m.role === 'assistant')
-        .slice(-1)[0]?.content?.toLowerCase() ?? '';
-      const assistantWasAskingDemographics =
-        /what'?s your name|your email|email address|company,? a non-profit|where are you based|how long (have|has)|how big is the team|technology play|recognition in the|nominating (yourself|a )?(team|product|individual|organization)/i.test(lastAssistantMessage) ||
-        lastAssistantMessage.includes('non-profit') ||
-        lastAssistantMessage.includes('organization behind');
-
-      const inRecommendationFlow =
-        (nextMissing !== null && hasAnyDemographic) ||
-        (conversationHistory.length >= 2 && assistantWasAskingDemographics);
-
-      if (inRecommendationFlow && (intent.intent === 'question' || intent.intent === 'mixed')) {
-        logger.info('intent_locked_to_information', {
-          original_intent: intent.intent,
-          reason: 'mid_demographic_flow',
-          has_any_demographic: hasAnyDemographic,
-          assistant_was_asking: assistantWasAskingDemographics,
-        });
-        intent = {
-          ...intent,
-          intent: 'information',
-          reasoning: intent.reasoning ? `${intent.reasoning} [Overridden: staying in recommendation flow.]` : 'Staying in recommendation flow.',
-        };
-      }
-
-      logger.info('intent_classified', {
-        intent: intent.intent,
-        confidence: intent.confidence,
+      logger.info('context_classified', {
+        context: context.context,
+        confidence: context.confidence,
       });
 
-      // Yield intent to client
+      // Yield context to client (frontend expects 'intent' field for backward compatibility)
       yield {
         type: 'intent',
-        intent: intent.intent,
-        confidence: intent.confidence,
+        intent: context.context,
+        confidence: context.confidence,
       };
 
-      // Step 3: If question intent, search KB (only when NOT locked to information)
+      // Step 3: If qa context, search KB
       let kbArticles: any[] | null = null;
       
-      if (intent.intent === 'question' || intent.intent === 'mixed') {
+      if (context.context === 'qa') {
         logger.info('step_2_searching_kb');
         kbArticles = await this.searchKB(message);
         
@@ -448,7 +416,7 @@ export class UnifiedChatbotService {
       logger.info('step_4_generating_response');
       for await (const chunk of conversationManager.generateResponseStream({
         message,
-        intent,
+        context,
         conversationHistory,
         userContext,
         kbArticles,
