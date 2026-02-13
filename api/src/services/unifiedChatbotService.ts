@@ -527,12 +527,12 @@ export class UnifiedChatbotService {
       
       // Log what changed during enrichment
       const enrichedFields = Object.keys(userContext).filter(
-        key => userContext[key] !== contextBeforeEnrichment[key] && userContext[key] !== undefined
+        key => (userContext as any)[key] !== (contextBeforeEnrichment as any)[key] && (userContext as any)[key] !== undefined
       );
       if (enrichedFields.length > 0) {
         logger.info('manual_enrichment_applied', { 
           fields: enrichedFields,
-          values: enrichedFields.reduce((acc, key) => ({ ...acc, [key]: userContext[key] }), {})
+          values: enrichedFields.reduce((acc, key) => ({ ...acc, [key]: (userContext as any)[key] }), {})
         });
       }
 
