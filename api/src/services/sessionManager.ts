@@ -6,20 +6,31 @@ import logger from '../utils/logger';
 /**
  * UserContext structure extracted from conversation
  * Pre-populated fields come from user profile
+ * Demographic layer: user_name, user_email, geography, org_type, career_stage, etc.
  */
 export interface UserContext {
+  // Identity (collected early)
+  user_name?: string;
+  user_email?: string;
+
   // Pre-populated from user profile
-  geography: string;
-  organization_name: string;
+  geography?: string;
+  organization_name?: string;
   job_title?: string;
-  
+
+  // Demographic layer (umbrella questions)
+  org_type?: 'for_profit' | 'non_profit' | 'government' | 'education' | 'startup';
+  career_stage?: string;
+  gender_programs_opt_in?: boolean;
+  company_age?: string;
+  org_size?: 'small' | 'medium' | 'large';
+  tech_orientation?: string;
+  recognition_scope?: string;
+
   // Extracted from AI conversation
   operating_scope?: 'local' | 'national' | 'regional' | 'global';
-  org_type?: 'for_profit' | 'non_profit' | 'government' | 'education';
-  org_size?: 'small' | 'medium' | 'large';
   nomination_subject?: 'company' | 'individual' | 'team' | 'product';
   achievement_focus?: string[];
-  tech_orientation?: string;
   description?: string;
 }
 

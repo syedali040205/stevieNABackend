@@ -1,5 +1,10 @@
 import { openaiService } from './openaiService';
 import logger from '../utils/logger';
+import {
+  DEMOGRAPHIC_STEPS,
+  getFirstMissingStep,
+  STEP_TO_CONTEXT_KEY,
+} from './demographicQuestions';
 
 /**
  * Conversation Manager Service
@@ -82,12 +87,12 @@ CONVERSATION STYLE:
 - Acknowledge what they say before moving forward
 - Be concise - 2-3 sentences max per response
 
-INFORMATION GATHERING (do this naturally, not like a form):
-- Start with: name, what they want to nominate (individual/team/org/product)
-- Then: what's the achievement/story
-- Naturally ask follow-up questions based on what they share
+INFORMATION GATHERING (conversational demographic layer — do NOT feel like a form):
+- Ask ONE question at a time, in the exact order the system specifies
+- Use the umbrella-style question phrasing provided (e.g. "Where are you based, and where does most of your work or business happen?")
+- Acknowledge what they said before asking the next thing
 - Don't ask for info they've already given
-- When you have enough, offer to find matching categories
+- When all required demographics are collected, offer to find matching categories (and optionally a brief achievement description for better matches)
 
 WHEN YOU DON'T KNOW THE ANSWER:
 - If you can't find information in the knowledge base or don't know the answer
@@ -105,16 +110,12 @@ IMPORTANT:
       return basePrompt + `
 
 RIGHT NOW: They want category recommendations.
-- CRITICAL: We need 4 things: name, email, location, nomination subject
-- Ask for missing information in this EXACT order:
-  1. Their name (if missing)
-  2. Their email (if missing)
-  3. Where they're from / their location (if missing)
-  4. What they're nominating: individual/team/organization/product (if missing)
-- Ask for ONE thing at a time, naturally
-- Once you have all FOUR, I'll generate personalized recommendations immediately
-- DO NOT ask about achievements, descriptions, or any other details
-- Keep it conversational and encouraging`;
+- We collect demographics in a set order so we can recommend the right Stevie programs (American, International, Technology Excellence, Women in Business, etc.).
+- The system will tell you EXACTLY which piece of info to ask for next and the umbrella question to use. Ask for ONE thing at a time.
+- Use the exact umbrella phrasing when given — it's designed to feel natural and get the right info for program routing.
+- Optional question (women-in-business programs): ask only when it's the next in order; if they skip or say no, that's fine.
+- Once we have all required demographics, offer to find matching categories. A brief achievement description then improves category fit.
+- Keep it conversational and encouraging. Never number your questions or sound like a form.`;
     } else if (intentType === 'question') {
       return basePrompt + `
 
@@ -166,17 +167,21 @@ RIGHT NOW: They asked a question AND shared info.
           msg.content.toLowerCase().includes('here are'))
     );
 
-    // Build context summary
+    // Build context summary (include all demographic + optional fields we have)
     const contextParts: string[] = [];
-    if (userContext.organization_name) {
-      contextParts.push(`Organization: ${userContext.organization_name}`);
-    }
-    if (userContext.nomination_subject) {
-      contextParts.push(`Nominating: ${userContext.nomination_subject}`);
-    }
-    if (userContext.description) {
-      contextParts.push(`About: ${userContext.description.substring(0, 150)}`);
-    }
+    if (userContext.user_name) contextParts.push(`Name: ${userContext.user_name}`);
+    if (userContext.user_email) contextParts.push(`Email: ${userContext.user_email}`);
+    if (userContext.geography) contextParts.push(`Location/region: ${userContext.geography}`);
+    if (userContext.org_type) contextParts.push(`Org type: ${userContext.org_type}`);
+    if (userContext.career_stage) contextParts.push(`Career stage: ${userContext.career_stage}`);
+    if (userContext.gender_programs_opt_in !== undefined) contextParts.push(`Consider women-in-business programs: ${userContext.gender_programs_opt_in ? 'yes' : 'no'}`);
+    if (userContext.company_age) contextParts.push(`Company age: ${userContext.company_age}`);
+    if (userContext.org_size) contextParts.push(`Team size: ${userContext.org_size}`);
+    if (userContext.tech_orientation) contextParts.push(`Tech orientation: ${userContext.tech_orientation}`);
+    if (userContext.recognition_scope) contextParts.push(`Recognition scope: ${userContext.recognition_scope}`);
+    if (userContext.nomination_subject) contextParts.push(`Nominating: ${userContext.nomination_subject}`);
+    if (userContext.organization_name) contextParts.push(`Organization: ${userContext.organization_name}`);
+    if (userContext.description) contextParts.push(`About: ${userContext.description.substring(0, 150)}`);
     const contextSummary = contextParts.length > 0 ? contextParts.join('\n') : 'Just started conversation';
 
     // Build recent conversation
@@ -211,14 +216,15 @@ Keep it SHORT and helpful.`;
 
     // Build prompt based on intent
     if (intentType === 'recommendation') {
-      // Special handling for recommendation intent - guide through required fields
-      const missing: string[] = [];
-      if (!userContext.user_name) missing.push('name');
-      if (!userContext.user_email) missing.push('email');
-      if (!userContext.geography) missing.push('location/country');
-      if (!userContext.nomination_subject) missing.push('nomination subject (individual/team/org/product)');
+      const nextStep = getFirstMissingStep(userContext, true);
+      const missingLabels: string[] = [];
+      for (const step of DEMOGRAPHIC_STEPS) {
+        const key = STEP_TO_CONTEXT_KEY[step.id];
+        const val = userContext[key];
+        if (val === undefined || val === null || val === '') missingLabels.push(step.label);
+      }
 
-      if (missing.length > 0) {
+      if (nextStep) {
         return `WHAT WE KNOW:
 ${contextSummary}
 
@@ -229,18 +235,15 @@ THEY SAID: "${message}"
 
 THEY WANT RECOMMENDATIONS!
 
-STILL NEED: ${missing.join(', ')}
+STILL NEED (in this order): ${missingLabels.join(', ')}
 
-CRITICAL: Ask for the FIRST missing item from this list in EXACT order:
-1. Name (if missing)
-2. Email (if missing)
-3. Location/Country - where they're from (if missing)
-4. What they're nominating: individual/team/organization/product (if missing)
+NEXT: Ask for "${nextStep.label}" using this umbrella-style question (adapt slightly if needed to sound natural):
+"${nextStep.umbrellaQuestion}"
 
-DO NOT ask about achievements, descriptions, or any other details yet.
-Ask naturally and conversationally. ONE question at a time. Keep it SHORT (1-2 sentences).`;
-      } else {
-        return `WHAT WE KNOW:
+Ask ONE question only. Acknowledge what they said first, then ask. Keep it SHORT (1-2 sentences).${nextStep.optional ? ' This question is optional — if they skip or say no, move on.' : ''}`;
+      }
+
+      return `WHAT WE KNOW:
 ${contextSummary}
 
 RECENT CONVERSATION:
@@ -248,12 +251,9 @@ ${historySummary}
 
 THEY SAID: "${message}"
 
-PERFECT! We have all required info (name, email, location, nomination subject)!
+We have all demographic info needed for program and category recommendations!
 
-Respond with: "Perfect! Let me find the best matching categories for you." 
-
-Keep it SHORT and positive. The system will automatically generate recommendations after your response.`;
-      }
+Respond warmly. You may say you have what you need and will find the best matching categories (and which Stevie programs fit them). If we don't have a brief achievement description yet, you can optionally ask for a sentence or two to improve category fit — then offer to generate recommendations. Keep it to 1-2 sentences. When they confirm, the system will generate recommendations.`;
     } else if (intentType === 'question') {
       const kbContext = this.buildKBContext(kbArticles);
       const hasRelevantKB = kbArticles && kbArticles.length > 0;
@@ -289,14 +289,18 @@ Respond naturally with something like: "I don't have specific information about 
 DO NOT provide specific facts, dates, deadlines, fees, or eligibility details. You have NO knowledge base articles — so provide NO specifics. Just politely decline and redirect.`;
       }
     } else if (intentType === 'information') {
-      // What info are we still missing? ONLY check the 4 required fields
-      const missing: string[] = [];
-      if (!userContext.user_name) missing.push('their name');
-      if (!userContext.user_email) missing.push('their email');
-      if (!userContext.geography) missing.push('their location/country');
-      if (!userContext.nomination_subject) missing.push('what they\'re nominating (individual/team/org/product)');
+      const nextStep = getFirstMissingStep(userContext, true);
+      const missingLabels: string[] = [];
+      for (const step of DEMOGRAPHIC_STEPS) {
+        const key = STEP_TO_CONTEXT_KEY[step.id];
+        const val = userContext[key];
+        if (val === undefined || val === null || val === '') missingLabels.push(step.label);
+      }
+      const missingText = missingLabels.length > 0 ? missingLabels.join(', ') : 'nothing — we have everything!';
 
-      const missingText = missing.length > 0 ? missing.join(', ') : 'nothing - we have everything!';
+      const nextInstruction = nextStep
+        ? `Ask for the NEXT item in order: "${nextStep.label}". Use this phrasing (adapt naturally): "${nextStep.umbrellaQuestion}". ONE question only.`
+        : 'We have all required demographics. Offer to find matching categories (and optionally a brief achievement description for better matches).';
 
       return `WHAT WE KNOW:
 ${contextSummary}
@@ -310,10 +314,8 @@ STILL NEED: ${missingText}
 
 Respond naturally:
 1. Acknowledge what they just shared (briefly!)
-2. If we still need info from the 4 required fields (name, email, location, nomination subject), ask for the NEXT one in order
-3. If we have all 4 required fields, offer to find matching categories
-4. DO NOT ask about achievements or descriptions
-5. Keep it SHORT - 1-2 sentences max`;
+2. ${nextInstruction}
+3. Keep it SHORT — 1-2 sentences max`;
     } else {
       // mixed
       const kbContext = this.buildKBContext(kbArticles);

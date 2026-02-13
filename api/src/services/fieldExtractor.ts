@@ -16,11 +16,16 @@ Your job is to extract structured information from the user's message and return
 
 - **user_name**: User's full name (string)
 - **user_email**: User's email address (string, must be valid email format)
-- **geography**: User's country or location (string, e.g., "India", "USA", "UAE", "Germany")
+- **geography**: Where they're based / where work happens (string, e.g., "India", "USA", "UAE", "Germany", "US and Europe")
 - **nomination_subject**: What they're nominating (values: "individual", "team", "organization", "product")
 - **description**: Description of the achievement or nomination (string, 20-500 chars)
-- **org_type**: Organization type (values: "for_profit", "non_profit", "government", "startup")
-- **org_size**: Organization size (values: "small", "medium", "large")
+- **org_type**: Organization type (values: "for_profit", "non_profit", "government", "startup", "education")
+- **org_size**: Team/organization size (values: "small", "medium", "large")
+- **career_stage**: Experience level (e.g., "just_started", "few_years", "decade_plus", or free text like "5 years")
+- **gender_programs_opt_in**: true if they want women-in-business programs considered, false if no/skip
+- **company_age**: How long org has been around (e.g., "less_than_year", "few_years", "over_10", or free text)
+- **tech_orientation**: Role of technology (e.g., "central", "supporting", "minimal", or free text)
+- **recognition_scope**: "us_only", "global", or "both"
 - **achievement_focus**: Array of focus areas (e.g., ["Innovation", "Technology", "Customer Service"])
 
 ## Rules:
@@ -49,6 +54,18 @@ User: "I want to nominate our team for winning the innovation award"
 
 User: "We're a small startup that developed an AI-powered mirror"
 → {"org_type":"startup","org_size":"small","achievement_focus":["Artificial Intelligence","Product Innovation"]}
+
+User: "I've been in this field for about 6 years"
+→ {"career_stage":"few_years"}
+
+User: "Yes, consider women in business awards too"
+→ {"gender_programs_opt_in":true}
+
+User: "We're very tech-heavy" or "Technology is central to what we do"
+→ {"tech_orientation":"central"}
+
+User: "Mainly US" or "Open to global recognition"
+→ {"recognition_scope":"us_only"} or {"recognition_scope":"global"}
 
 ## Output format:
 
@@ -120,6 +137,21 @@ export class FieldExtractor {
     }
     if (userContext.org_size) {
       contextParts.push(`Already know org_size: ${userContext.org_size}`);
+    }
+    if (userContext.career_stage) {
+      contextParts.push(`Already know career_stage: ${userContext.career_stage}`);
+    }
+    if (userContext.gender_programs_opt_in !== undefined) {
+      contextParts.push(`Already know gender_programs_opt_in: ${userContext.gender_programs_opt_in}`);
+    }
+    if (userContext.company_age) {
+      contextParts.push(`Already know company_age: ${userContext.company_age}`);
+    }
+    if (userContext.tech_orientation) {
+      contextParts.push(`Already know tech_orientation: ${userContext.tech_orientation}`);
+    }
+    if (userContext.recognition_scope) {
+      contextParts.push(`Already know recognition_scope: ${userContext.recognition_scope}`);
     }
     if (userContext.description) {
       contextParts.push(`Already have description: ${userContext.description.substring(0, 100)}`);
@@ -219,6 +251,44 @@ Extract any new fields from this message.`;
         cleaned.achievement_focus = result.achievement_focus
           .filter((f: any) => typeof f === 'string' && f.trim().length > 0)
           .map((f: string) => f.trim());
+      }
+
+      // career_stage
+      if (result.career_stage && typeof result.career_stage === 'string') {
+        const s = result.career_stage.trim().toLowerCase();
+        if (['just_started', 'few_years', 'decade_plus'].includes(s)) {
+          cleaned.career_stage = s;
+        } else if (result.career_stage.length >= 2 && result.career_stage.length <= 80) {
+          cleaned.career_stage = result.career_stage.trim();
+        }
+      }
+
+      // gender_programs_opt_in
+      if (typeof result.gender_programs_opt_in === 'boolean') {
+        cleaned.gender_programs_opt_in = result.gender_programs_opt_in;
+      }
+      if (typeof result.gender_programs_opt_in === 'string') {
+        const v = result.gender_programs_opt_in.toLowerCase();
+        if (v === 'true' || v === 'yes' || v === '1') cleaned.gender_programs_opt_in = true;
+        if (v === 'false' || v === 'no' || v === '0') cleaned.gender_programs_opt_in = false;
+      }
+
+      // company_age
+      if (result.company_age && typeof result.company_age === 'string') {
+        const a = result.company_age.trim();
+        if (a.length >= 2 && a.length <= 80) cleaned.company_age = a;
+      }
+
+      // tech_orientation
+      if (result.tech_orientation && typeof result.tech_orientation === 'string') {
+        const t = result.tech_orientation.trim();
+        if (t.length >= 2 && t.length <= 80) cleaned.tech_orientation = t;
+      }
+
+      // recognition_scope
+      if (result.recognition_scope && typeof result.recognition_scope === 'string') {
+        const r = result.recognition_scope.trim().toLowerCase();
+        if (['us_only', 'global', 'both'].includes(r)) cleaned.recognition_scope = r;
       }
 
       return cleaned;
