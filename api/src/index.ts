@@ -58,6 +58,7 @@ import unifiedChatbotRouter from "./routes/unified-chatbot";
 import documentsRouter from "./routes/documents";
 import diagnosticRouter from "./routes/diagnostic";
 import internalRouter from "./routes/internal";
+import ragDiagnosticRouter from "./routes/rag-diagnostic";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -159,6 +160,7 @@ app.use("/metrics", metricsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/documents", documentsRouter);
 app.use("/api/diagnostic", diagnosticRouter);
+app.use("/api/rag-diagnostic", ragDiagnosticRouter);
 app.use("/api", unifiedChatbotRouter);
 
 // Root endpoint
