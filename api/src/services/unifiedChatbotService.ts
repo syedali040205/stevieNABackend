@@ -110,7 +110,14 @@ export class UnifiedChatbotService {
     }
     
     // Build comprehensive description from conversation history if missing or too short
-    if (!enrichedContext.description || enrichedContext.description.length < 50) {
+    // BUT: Don't auto-fill if we haven't explicitly asked for achievement_description yet
+    const hasAskedForDescription = conversationHistory.some(msg => 
+      msg.role === 'assistant' && 
+      (msg.content.toLowerCase().includes('achievement') || 
+       msg.content.toLowerCase().includes('what makes this nomination special'))
+    );
+    
+    if (hasAskedForDescription && (!enrichedContext.description || enrichedContext.description.length < 50)) {
       const userMessages = conversationHistory
         .filter(m => m.role === 'user')
         .map(m => m.content)
@@ -458,22 +465,14 @@ export class UnifiedChatbotService {
         };
 
         try {
-          // Build a proper description from conversation if missing
-          let description = userContext.description;
-          if (!description || description.length < 20) {
-            // Build from conversation history
-            const userMessages = conversationHistory
-              .filter(m => m.role === 'user')
-              .map(m => m.content)
-              .join(' ');
-            description = userMessages || 'Seeking award category recommendations';
-          }
+          // Use description from context (should be collected via achievement_description step)
+          const description = userContext.description || 'Seeking award category recommendations';
 
-          // Fill in smart defaults for missing required fields
+          // Fill in smart defaults for missing optional fields only
           const contextForRecommendations = {
             ...userContext,
             description: description,
-            // Smart defaults if fields are missing
+            // Smart defaults for optional fields only
             org_type: userContext.org_type || 'for_profit',
             org_size: userContext.org_size || 'small',
             achievement_focus: userContext.achievement_focus || ['Innovation', 'Technology', 'Product Development']
