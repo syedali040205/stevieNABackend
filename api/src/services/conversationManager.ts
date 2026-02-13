@@ -114,7 +114,8 @@ RIGHT NOW: They want category recommendations.
 - The system will tell you EXACTLY which piece of info to ask for next and the umbrella question to use. Ask for ONE thing at a time.
 - Use the exact umbrella phrasing when given — it's designed to feel natural and get the right info for program routing.
 - Optional question (women-in-business programs): ask only when it's the next in order; if they skip or say no, that's fine.
-- Once we have all required demographics, offer to find matching categories. A brief achievement description then improves category fit.
+- ACHIEVEMENT DESCRIPTION: When asking about achievements, encourage them to share 3-4 key points: (1) What they accomplished, (2) Impact/results, (3) Innovation/uniqueness, (4) Challenges overcome. Let them answer naturally over multiple messages if needed.
+- Once we have all required demographics INCLUDING achievement description, the system will auto-generate recommendations.
 - Keep it conversational and encouraging. Never number your questions or sound like a form.`;
     } else {
       // qa context
@@ -212,6 +213,9 @@ Keep it SHORT and helpful.`;
         let hint = '';
         if (nextStep.id === 'org_type' && userContext.nomination_subject) {
           hint = ` We already know they're nominating a ${userContext.nomination_subject}. Phrase it as: "Got it — you're nominating a ${userContext.nomination_subject}. Is the organization behind it a company, a non-profit, or something else?"`;
+        }
+        if (nextStep.id === 'achievement_description') {
+          hint = ` This is the MOST IMPORTANT question. Encourage them to share details about: (1) What they accomplished, (2) Impact/results, (3) What makes it innovative/unique, (4) Any challenges overcome. Let them answer naturally - they can share multiple messages if needed. Be encouraging and curious!`;
         }
         return `WHAT WE KNOW:
 ${contextSummary}

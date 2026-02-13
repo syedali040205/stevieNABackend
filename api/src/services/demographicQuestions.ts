@@ -12,7 +12,7 @@
 export type DemographicStepId =
   | 'user_name'
   | 'user_email'
-  | 'geography'
+  | 'nomination_subject'
   | 'org_type'
   | 'career_stage'
   | 'gender_programs'  // optional, opt-in
@@ -20,7 +20,7 @@ export type DemographicStepId =
   | 'org_size'
   | 'tech_orientation'
   | 'recognition_scope'
-  | 'nomination_subject';
+  | 'achievement_description';  // NEW: Ask about achievements before recommendations
 
 export interface DemographicStep {
   id: DemographicStepId;
@@ -48,11 +48,6 @@ export const DEMOGRAPHIC_STEPS: DemographicStep[] = [
     id: 'nomination_subject',
     umbrellaQuestion: "What are you nominating — yourself (individual), a team, your organization, or a product?",
     label: 'what you\'re nominating (individual/team/organization/product)',
-  },
-  {
-    id: 'geography',
-    umbrellaQuestion: "Where are you based, and where does most of your work or business happen?",
-    label: 'location / where you\'re based',
   },
   {
     id: 'org_type',
@@ -90,13 +85,18 @@ export const DEMOGRAPHIC_STEPS: DemographicStep[] = [
     umbrellaQuestion: "Are you mainly looking for recognition in the U.S., or are you open to global recognition too?",
     label: 'recognition scope (U.S. vs global)',
   },
+  {
+    id: 'achievement_description',
+    umbrellaQuestion: "Tell me about the specific achievements or contributions you'd like to highlight. What makes this nomination special?",
+    label: 'achievement description',
+  },
 ];
 
 /** Context key for each step id (for checking "do we have this?"). */
 export const STEP_TO_CONTEXT_KEY: Record<DemographicStepId, string> = {
   user_name: 'user_name',
   user_email: 'user_email',
-  geography: 'geography',
+  nomination_subject: 'nomination_subject',
   org_type: 'org_type',
   career_stage: 'career_stage',
   gender_programs: 'gender_programs_opt_in',
@@ -104,7 +104,7 @@ export const STEP_TO_CONTEXT_KEY: Record<DemographicStepId, string> = {
   org_size: 'org_size',
   tech_orientation: 'tech_orientation',
   recognition_scope: 'recognition_scope',
-  nomination_subject: 'nomination_subject',
+  achievement_description: 'description',
 };
 
 /**
@@ -138,14 +138,14 @@ export function hasRequiredDemographics(context: Record<string, any>): boolean {
 }
 
 /**
- * Minimum needed to generate category recommendations (name, email, location, nomination subject).
- * Used for backward compatibility and to trigger recommendations when user says "yes, find categories".
+ * Minimum needed to generate category recommendations.
+ * Geography comes from user profile, so not in DEMOGRAPHIC_STEPS.
  */
 export function hasMinimumForRecommendations(context: Record<string, any>): boolean {
   return !!(
     context.user_name &&
     context.user_email &&
-    context.geography &&
+    context.geography &&  // From user profile
     context.nomination_subject
   );
 }

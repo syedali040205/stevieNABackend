@@ -647,13 +647,14 @@ export class UnifiedChatbotService {
       context.user_name &&
       context.user_email &&
       context.nomination_subject &&
-      context.geography &&
+      context.geography &&  // From user profile
       context.org_type &&
       context.career_stage &&
       context.company_age &&
       context.org_size &&
       context.tech_orientation &&
-      context.recognition_scope
+      context.recognition_scope &&
+      context.description  // Achievement description
     );
 
     logger.info('recommendation_check', {
