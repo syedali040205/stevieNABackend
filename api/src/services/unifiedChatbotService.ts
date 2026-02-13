@@ -410,6 +410,14 @@ export class UnifiedChatbotService {
       // Manual context enrichment as workaround for weak field extraction
       userContext = this.enrichContextFromConversation(userContext, message, conversationHistory);
 
+      // Special handling for "no" responses to gender_programs question
+      const messageLower = message.toLowerCase().trim();
+      const isNo = messageLower === 'no' || messageLower === 'nope' || messageLower === 'no dont' || messageLower === 'no don\'t';
+      if (isNo && (userContext.gender_programs_opt_in === undefined || userContext.gender_programs_opt_in === null)) {
+        userContext.gender_programs_opt_in = false;
+        logger.info('set_gender_programs_to_false', { message });
+      }
+
       // Step 4: Generate response (Node.js streaming) with enriched context
       // Accumulate assistant response so we can persist it in conversation history
       let assistantResponse = '';

@@ -61,6 +61,9 @@ User: "I've been in this field for about 6 years"
 User: "Yes, consider women in business awards too"
 → {"gender_programs_opt_in":true}
 
+User: "No" or "no dont" or "NO" (when asked about women-in-business programs)
+→ {"gender_programs_opt_in":false}
+
 User: "We're very tech-heavy" or "Technology is central to what we do"
 → {"tech_orientation":"central"}
 
@@ -161,7 +164,17 @@ export class FieldExtractor {
       ? `\n\nContext already collected:\n${contextParts.join('\n')}\n\nDon't extract fields we already have.`
       : '';
 
-    return `User message: "${message}"${contextInfo}
+    // Check if this is a simple "no" response to the gender_programs question
+    const messageLower = message.toLowerCase().trim();
+    const isSimpleNo = messageLower === 'no' || messageLower === 'no dont' || messageLower === 'nope';
+    const needsGenderPrograms = userContext.gender_programs_opt_in === undefined || userContext.gender_programs_opt_in === null;
+    
+    let hint = '';
+    if (isSimpleNo && needsGenderPrograms) {
+      hint = '\n\nHINT: This looks like a "no" response to the women-in-business programs question. Extract: {"gender_programs_opt_in":false}';
+    }
+
+    return `User message: "${message}"${contextInfo}${hint}
 
 Extract any new fields from this message.`;
   }
