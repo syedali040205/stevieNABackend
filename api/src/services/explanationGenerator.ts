@@ -55,7 +55,7 @@ export class ExplanationGenerator {
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.3,
-        maxTokens: 1000,
+        maxTokens: 2000, // Increased for more categories
       });
 
       const explanations = this.parseResponse(response, categories);
@@ -138,7 +138,7 @@ export class ExplanationGenerator {
   }
 
   /**
-   * Parse OpenAI response
+   * Parse OpenAI response with better error handling for truncated JSON
    */
   private parseResponse(
     raw: string,
@@ -172,10 +172,40 @@ export class ExplanationGenerator {
     } catch (error: any) {
       logger.error('explanation_parse_error', {
         error: error.message,
-        response: text.substring(0, 300),
+        response: text.substring(0, 500),
+        response_length: text.length,
       });
 
+      // Try to salvage partial JSON by finding complete category objects
+      try {
+        const partialMatch = text.match(/"explanations"\s*:\s*\[([\s\S]*)/);
+        if (partialMatch) {
+          // Find all complete category objects
+          const categoryPattern = /\{\s*"category_id"\s*:\s*"([^"]+)"\s*,\s*"match_reasons"\s*:\s*\[((?:[^[\]]*|\[[^\]]*\])*)\]\s*\}/g;
+          const matches = [...text.matchAll(categoryPattern)];
+          
+          if (matches.length > 0) {
+            logger.info('salvaged_partial_explanations', { count: matches.length });
+            return matches.map(match => {
+              const categoryId = match[1];
+              const reasonsStr = match[2];
+              const reasons = reasonsStr
+                .split(',')
+                .map(r => r.trim().replace(/^"|"$/g, ''))
+                .filter(r => r.length > 0);
+              return {
+                category_id: categoryId,
+                match_reasons: reasons,
+              };
+            });
+          }
+        }
+      } catch (salvageError: any) {
+        logger.warn('salvage_failed', { error: salvageError.message });
+      }
+
       // Fallback: generate generic reasons
+      logger.info('using_generic_explanations', { count: categories.length });
       return categories.map((cat) => ({
         category_id: cat.category_id,
         match_reasons: [
