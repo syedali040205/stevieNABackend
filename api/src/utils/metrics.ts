@@ -106,6 +106,14 @@ export const errorCounter = new Counter({
   registers: [register],
 });
 
+// OpenAI token usage (for cost control and SRE at scale)
+export const openaiTokensTotal = new Counter({
+  name: 'openai_tokens_total',
+  help: 'Total OpenAI tokens used',
+  labelNames: ['type'], // 'prompt' | 'completion'
+  registers: [register],
+});
+
 // Collect default metrics (CPU, memory, etc.)
 import { collectDefaultMetrics } from 'prom-client';
 collectDefaultMetrics({ register });

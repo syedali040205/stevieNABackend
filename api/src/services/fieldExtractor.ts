@@ -16,6 +16,7 @@ Your job is to extract structured information from the user's message and return
 
 - **user_name**: User's full name (string)
 - **user_email**: User's email address (string, must be valid email format)
+- **geography**: User's country or location (string, e.g., "India", "USA", "UAE", "Germany")
 - **nomination_subject**: What they're nominating (values: "individual", "team", "organization", "product")
 - **description**: Description of the achievement or nomination (string, 20-500 chars)
 - **org_type**: Organization type (values: "for_profit", "non_profit", "government", "startup")
@@ -30,20 +31,24 @@ Your job is to extract structured information from the user's message and return
 4. For achievement_focus, extract multiple areas if mentioned
 5. Keep descriptions concise but informative
 6. For user_email, validate it's a proper email format (contains @ and domain)
+7. For geography, extract country name (e.g., "India", "USA", "United Kingdom", "UAE")
 
 ## Examples:
 
 User: "My name is John Smith and my email is john@company.com"
 → {"user_name":"John Smith","user_email":"john@company.com"}
 
+User: "I'm from India"
+→ {"geography":"India"}
+
+User: "We're based in the United States"
+→ {"geography":"USA"}
+
 User: "I want to nominate our team for winning the innovation award"
 → {"nomination_subject":"team","achievement_focus":["Innovation"]}
 
 User: "We're a small startup that developed an AI-powered mirror"
 → {"org_type":"startup","org_size":"small","achievement_focus":["Artificial Intelligence","Product Innovation"]}
-
-User: "Our product won top 5 in the ideathon competition"
-→ {"nomination_subject":"product","achievement_focus":["Competition Success","Recognition"],"description":"Won top 5 in ideathon competition"}
 
 ## Output format:
 
@@ -104,6 +109,9 @@ export class FieldExtractor {
     if (userContext.user_email) {
       contextParts.push(`Already know user_email: ${userContext.user_email}`);
     }
+    if (userContext.geography) {
+      contextParts.push(`Already know geography: ${userContext.geography}`);
+    }
     if (userContext.nomination_subject) {
       contextParts.push(`Already know nomination_subject: ${userContext.nomination_subject}`);
     }
@@ -162,6 +170,14 @@ Extract any new fields from this message.`;
         // Basic email validation
         if (email.includes('@') && email.includes('.') && email.length >= 5) {
           cleaned.user_email = email;
+        }
+      }
+
+      // geography
+      if (result.geography && typeof result.geography === 'string') {
+        const geo = result.geography.trim();
+        if (geo.length >= 2 && geo.length <= 100) {
+          cleaned.geography = geo;
         }
       }
 

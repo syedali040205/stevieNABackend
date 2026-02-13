@@ -44,6 +44,7 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import { getSupabaseClient, closeSupabaseConnection } from "./config/supabase";
+import { cacheManager } from "./services/cacheManager";
 import logger from "./utils/logger";
 import { correlationIdMiddleware } from "./middleware/correlationId";
 import { requestLoggerMiddleware } from "./middleware/requestLogger";
@@ -56,6 +57,7 @@ import usersRouter from "./routes/users";
 import unifiedChatbotRouter from "./routes/unified-chatbot";
 import documentsRouter from "./routes/documents";
 import diagnosticRouter from "./routes/diagnostic";
+import internalRouter from "./routes/internal";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -152,6 +154,7 @@ try {
 
 // Routes
 app.use("/api/health", healthRouter);
+app.use("/api/internal", internalRouter);
 app.use("/metrics", metricsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/documents", documentsRouter);
@@ -191,10 +194,16 @@ const server = app.listen(PORT, () => {
 const gracefulShutdown = (signal: string) => {
   logger.info(`${signal} received. Starting graceful shutdown...`);
 
-  server.close(() => {
+  server.close(async () => {
     logger.info("HTTP server closed");
 
-    // Close Supabase connection
+    try {
+      await cacheManager.close();
+      logger.info("Redis connection closed");
+    } catch (e) {
+      logger.warn("Redis close error", { error: (e as Error).message });
+    }
+
     closeSupabaseConnection();
     logger.info("Database connections closed");
 

@@ -36,10 +36,17 @@ interface Category {
 }
 
 /**
- * Format category information into text for embedding.
+ * Format category text for embedding. Must match api/src/services/embeddingManager.ts
+ * formatCategoryText (focus areas first) so query and document embeddings align.
  */
 function formatCategoryText(category: Category): string {
   const parts: string[] = [];
+
+  // Focus areas first (same as embeddingManager for semantic alignment)
+  if (category.achievement_focus && Array.isArray(category.achievement_focus) && category.achievement_focus.length > 0) {
+    const focusAreas = category.achievement_focus.join(', ');
+    parts.push(`Focus areas: ${focusAreas}.`);
+  }
 
   // Category name and description
   parts.push(`${category.category_name}. ${category.description}.`);
@@ -48,12 +55,6 @@ function formatCategoryText(category: Category): string {
   if (category.applicable_org_types && Array.isArray(category.applicable_org_types) && category.applicable_org_types.length > 0) {
     const orgTypes = category.applicable_org_types.join(', ');
     parts.push(`Eligible for ${orgTypes}.`);
-  }
-
-  // Focus areas
-  if (category.achievement_focus && Array.isArray(category.achievement_focus) && category.achievement_focus.length > 0) {
-    const focusAreas = category.achievement_focus.join(', ');
-    parts.push(`Focus areas: ${focusAreas}.`);
   }
 
   // Program name

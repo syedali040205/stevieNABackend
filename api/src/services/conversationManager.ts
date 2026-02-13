@@ -105,14 +105,15 @@ IMPORTANT:
       return basePrompt + `
 
 RIGHT NOW: They want category recommendations.
-- This is great! But we need specific information first
-- Ask for missing information in this order:
+- CRITICAL: We need 4 things: name, email, location, nomination subject
+- Ask for missing information in this EXACT order:
   1. Their name (if missing)
   2. Their email (if missing)
-  3. What they're nominating: individual/team/organization/product (if missing)
-  4. Description of the achievement (if missing or too short)
+  3. Where they're from / their location (if missing)
+  4. What they're nominating: individual/team/organization/product (if missing)
 - Ask for ONE thing at a time, naturally
-- Once you have all four, I'll generate personalized recommendations
+- Once you have all FOUR, I'll generate personalized recommendations immediately
+- DO NOT ask about achievements, descriptions, or any other details
 - Keep it conversational and encouraging`;
     } else if (intentType === 'question') {
       return basePrompt + `
@@ -214,6 +215,7 @@ Keep it SHORT and helpful.`;
       const missing: string[] = [];
       if (!userContext.user_name) missing.push('name');
       if (!userContext.user_email) missing.push('email');
+      if (!userContext.geography) missing.push('location/country');
       if (!userContext.nomination_subject) missing.push('nomination subject (individual/team/org/product)');
 
       if (missing.length > 0) {
@@ -229,11 +231,13 @@ THEY WANT RECOMMENDATIONS!
 
 STILL NEED: ${missing.join(', ')}
 
-Ask for the FIRST missing item from this list in order:
-1. Name
-2. Email  
-3. What they're nominating (individual/team/organization/product)
+CRITICAL: Ask for the FIRST missing item from this list in EXACT order:
+1. Name (if missing)
+2. Email (if missing)
+3. Location/Country - where they're from (if missing)
+4. What they're nominating: individual/team/organization/product (if missing)
 
+DO NOT ask about achievements, descriptions, or any other details yet.
 Ask naturally and conversationally. ONE question at a time. Keep it SHORT (1-2 sentences).`;
       } else {
         return `WHAT WE KNOW:
@@ -244,7 +248,7 @@ ${historySummary}
 
 THEY SAID: "${message}"
 
-PERFECT! We have all required info (name, email, nomination subject)!
+PERFECT! We have all required info (name, email, location, nomination subject)!
 
 Respond with: "Perfect! Let me find the best matching categories for you." 
 
@@ -285,14 +289,14 @@ Respond naturally with something like: "I don't have specific information about 
 DO NOT provide specific facts, dates, deadlines, fees, or eligibility details. You have NO knowledge base articles — so provide NO specifics. Just politely decline and redirect.`;
       }
     } else if (intentType === 'information') {
-      // What info are we still missing?
+      // What info are we still missing? ONLY check the 4 required fields
       const missing: string[] = [];
       if (!userContext.user_name) missing.push('their name');
       if (!userContext.user_email) missing.push('their email');
+      if (!userContext.geography) missing.push('their location/country');
       if (!userContext.nomination_subject) missing.push('what they\'re nominating (individual/team/org/product)');
-      if (!userContext.description) missing.push('their achievement/story');
 
-      const missingText = missing.length > 0 ? missing.join(', ') : 'nothing - we have the basics!';
+      const missingText = missing.length > 0 ? missing.join(', ') : 'nothing - we have everything!';
 
       return `WHAT WE KNOW:
 ${contextSummary}
@@ -306,9 +310,10 @@ STILL NEED: ${missingText}
 
 Respond naturally:
 1. Acknowledge what they just shared (briefly!)
-2. If we still need info, ask ONE natural follow-up question
-3. If we have enough, offer to find matching categories
-4. Keep it SHORT - 1-2 sentences max`;
+2. If we still need info from the 4 required fields (name, email, location, nomination subject), ask for the NEXT one in order
+3. If we have all 4 required fields, offer to find matching categories
+4. DO NOT ask about achievements or descriptions
+5. Keep it SHORT - 1-2 sentences max`;
     } else {
       // mixed
       const kbContext = this.buildKBContext(kbArticles);

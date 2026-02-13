@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validation";
 import { optionalAuth } from "../middleware/auth";
-import { chatRateLimiter } from "../middleware/rateLimiter";
+import { chatRateLimitRedis } from "../middleware/chatRateLimit";
 import { unifiedChatbotService } from "../services/unifiedChatbotService";
 import logger from "../utils/logger";
 
@@ -33,8 +33,8 @@ const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
  */
 router.post(
   "/chat",
-  optionalAuth, // Extract user_id from token if present
-  chatRateLimiter, // 60 requests per 15 minutes per IP (LLM calls are expensive)
+  optionalAuth, // Must run first so we have user id for rate limit key
+  chatRateLimitRedis, // Per-user when authenticated, per-IP when anonymous (Redis-backed)
   validate(chatSchema),
   async (req: Request, res: Response) => {
     const correlationId = (req as any).correlationId;

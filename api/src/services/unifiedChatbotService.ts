@@ -30,6 +30,8 @@ export class UnifiedChatbotService {
   private sessionManager = new SessionManager();
   private readonly KB_CACHE_PREFIX = 'kb_search:';
   private readonly KB_CACHE_TTL = 3600; // 1 hour (KB articles rarely change)
+  /** Max conversation turns to store (user+assistant pairs). Keeps session_data bounded for scale. */
+  private readonly MAX_CONVERSATION_HISTORY = 40;
 
   /**
    * Generate cache key for KB search
@@ -368,16 +370,10 @@ export class UnifiedChatbotService {
         userContext,
       });
 
-      // Log detailed extraction results
-      logger.info('extracted_fields_detail', {
-        raw_extracted: extractedFields,
-        context_before: {
-          nomination_subject: userContext.nomination_subject,
-          description: userContext.description?.substring(0, 100),
-          org_type: userContext.org_type,
-          org_size: userContext.org_size,
-          achievement_focus: userContext.achievement_focus
-        }
+      // Debug only: avoid PII in production logs (see SCALING-ROADMAP Security)
+      logger.debug('extracted_fields_detail', {
+        field_names: Object.keys(extractedFields),
+        context_before_keys: Object.keys(userContext).filter((k) => (userContext as unknown as Record<string, unknown>)[k] != null),
       });
 
       // Update context with extracted fields
@@ -385,12 +381,8 @@ export class UnifiedChatbotService {
         logger.info('fields_extracted', { fields: Object.keys(extractedFields) });
         userContext = { ...userContext, ...extractedFields };
         
-        logger.info('context_after_extraction', {
-          nomination_subject: userContext.nomination_subject,
-          description: userContext.description?.substring(0, 100),
-          org_type: userContext.org_type,
-          org_size: userContext.org_size,
-          achievement_focus: userContext.achievement_focus
+        logger.debug('context_after_extraction', {
+          keys_updated: Object.keys(extractedFields),
         });
       } else {
         logger.warn('no_fields_extracted', { message: message.substring(0, 100) });
@@ -400,6 +392,8 @@ export class UnifiedChatbotService {
       userContext = this.enrichContextFromConversation(userContext, message, conversationHistory);
 
       // Step 4: Generate response (Node.js streaming) with enriched context
+      // Accumulate assistant response so we can persist it in conversation history
+      let assistantResponse = '';
       logger.info('step_4_generating_response');
       for await (const chunk of conversationManager.generateResponseStream({
         message,
@@ -408,6 +402,7 @@ export class UnifiedChatbotService {
         userContext,
         kbArticles,
       })) {
+        assistantResponse += chunk;
         yield {
           type: 'chunk',
           content: chunk,
@@ -445,7 +440,10 @@ export class UnifiedChatbotService {
             achievement_focus: userContext.achievement_focus || ['Innovation', 'Technology', 'Product Development']
           };
 
-          logger.info('recommendation_context', contextForRecommendations);
+          logger.info('recommendation_context', {
+            has_description: !!contextForRecommendations.description,
+            nomination_subject: contextForRecommendations.nomination_subject,
+          });
 
           const recommendations = await recommendationEngine.generateRecommendations(
             contextForRecommendations as any,
@@ -463,22 +461,27 @@ export class UnifiedChatbotService {
           logger.error('recommendation_generation_error', { 
             error: recError.message,
             stack: recError.stack,
-            context: userContext
           });
           
           // If recommendations fail, still continue conversation
+          const fallbackContent = '\n\nI have enough information, but I encountered an issue generating recommendations. Could you provide a bit more detail about your achievement?';
+          assistantResponse += fallbackContent;
           yield {
             type: 'chunk',
-            content: '\n\nI have enough information, but I encountered an issue generating recommendations. Could you provide a bit more detail about your achievement?'
+            content: fallbackContent,
           };
         }
       }
 
-      // Step 6: Update session with new message and context
-      const updatedHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
+      // Step 6: Update session with new message, assistant response, and context
+      const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
         ...conversationHistory,
         { role: 'user' as const, content: message },
+        { role: 'assistant' as const, content: assistantResponse || '(No response)' },
       ];
+      const updatedHistory = fullHistory.length > this.MAX_CONVERSATION_HISTORY
+        ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY)
+        : fullHistory;
 
       await this.sessionManager.updateSession(
         sessionId,
@@ -592,11 +595,12 @@ export class UnifiedChatbotService {
       messageLower.includes('ok') ||
       messageLower.includes('okay');
 
-    // ONLY require: name, email, nomination_subject
+    // ONLY require: name, email, geography, nomination_subject
     // Description is optional - we can generate recommendations without it
     const hasMinimumInfo = !!(
       context.user_name &&
       context.user_email &&
+      context.geography &&
       context.nomination_subject
     );
 
@@ -605,11 +609,12 @@ export class UnifiedChatbotService {
       has_minimum: hasMinimumInfo,
       has_name: !!context.user_name,
       has_email: !!context.user_email,
+      has_geography: !!context.geography,
       has_nomination_subject: !!context.nomination_subject,
       message: message.substring(0, 50)
     });
 
-    // If user is asking AND we have minimum info (name, email, subject), generate recommendations
+    // If user is asking AND we have minimum info (name, email, geography, subject), generate recommendations
     if (askingForRecommendations && hasMinimumInfo) {
       return true;
     }

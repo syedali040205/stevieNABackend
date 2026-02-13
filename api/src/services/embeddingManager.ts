@@ -39,9 +39,13 @@ interface SimilarityResult {
   achievement_focus: string[];
 }
 
+/** Expected embedding dimension for pgvector (ada-002 and 3-small both use 1536). */
+export const EMBEDDING_DIMENSION = 1536;
+
 /**
  * Embedding Manager for generating embeddings and performing similarity search.
  * Handles both category and user query embeddings using OpenAI API.
+ * Category and query must use the same model; pgvector column must be dimension 1536.
  */
 export class EmbeddingManager {
   private client: SupabaseClient;
@@ -49,16 +53,23 @@ export class EmbeddingManager {
 
   constructor(client?: SupabaseClient) {
     this.client = client || getSupabaseClient();
+    // Use 3-small for better semantic accuracy (1536 dims); must match category_embeddings table.
     this.embeddingModel =
-      process.env.EMBEDDING_MODEL || "text-embedding-ada-002";
+      process.env.EMBEDDING_MODEL || "text-embedding-3-small";
   }
 
   /**
    * Format category information into text for embedding.
-   * Format: "[Category Name]. [Description]. Eligible for [org types]. Focus areas: [achievement_focus]. Program: [Program Name]."
+   * Structure puts discriminative terms first (focus areas, name) for better semantic match.
    */
   formatCategoryText(category: Category): string {
     const parts: string[] = [];
+
+    // Focus areas first (strong signal for matching user achievements)
+    if (category.achievement_focus && category.achievement_focus.length > 0) {
+      const focusAreas = category.achievement_focus.join(", ");
+      parts.push(`Focus areas: ${focusAreas}.`);
+    }
 
     // Category name and description
     parts.push(`${category.category_name}. ${category.description}.`);
@@ -72,12 +83,6 @@ export class EmbeddingManager {
       parts.push(`Eligible for ${orgTypes}.`);
     }
 
-    // Focus areas
-    if (category.achievement_focus && category.achievement_focus.length > 0) {
-      const focusAreas = category.achievement_focus.join(", ");
-      parts.push(`Focus areas: ${focusAreas}.`);
-    }
-
     // Program name
     parts.push(`Program: ${category.program_name}.`);
 
@@ -85,86 +90,103 @@ export class EmbeddingManager {
   }
 
   /**
-   * Format user query into text for embedding.
-   * OPTIMIZED: Achievement and focus areas come first for better semantic matching.
+   * Format user query to mirror category text structure so query and documents
+   * live in the same semantic space (same phrasing: "Focus areas:", "Nominating", etc.).
+   * Optionally enriches with synonyms for better semantic overlap (see expandQuerySynonyms).
    */
-  formatUserQueryText(context: UserContext): string {
+  formatUserQueryText(context: UserContext, enrichWithSynonyms: boolean = true): string {
     const parts: string[] = [];
 
-    // 1. ACHIEVEMENT FIRST (most important for semantic matching)
-    if (context.description) {
-      parts.push(`Achievement: ${context.description}.`);
-    }
-
-    // 2. FOCUS AREAS (critical for matching relevant categories)
+    // Focus areas first (same order as formatCategoryText)
     if (context.achievement_focus && context.achievement_focus.length > 0) {
-      const focusAreas = context.achievement_focus.join(", ");
-      parts.push(`Focus areas: ${focusAreas}.`);
+      const focus = context.achievement_focus.join(", ");
+      parts.push(`Focus areas: ${enrichWithSynonyms ? this.expandFocusAreas(focus) : focus}.`);
     }
 
-    // 3. Nomination subject with context
+    // Achievement description (main semantic content); enrich with related terms for better match
+    if (context.description) {
+      parts.push(enrichWithSynonyms ? this.expandDescriptionForSearch(context.description) : context.description);
+    }
+
+    // Nomination subject (same phrasing as category side)
     if (context.nomination_subject) {
-      const subjectContext: Record<string, string> = {
-        product: "Nominating a product or service",
-        organization: "Nominating an entire organization",
-        team: "Nominating a team or department",
-        individual: "Nominating an individual person",
-      };
-      parts.push(
-        subjectContext[context.nomination_subject] ||
-          `Nominating: ${context.nomination_subject}.`,
-      );
+      parts.push(`Nominating ${context.nomination_subject}.`);
     }
 
-    // 4. Organization context (less important for semantic matching)
-    const orgDetails: string[] = [];
+    // Optional: org type/size so "Eligible for" style match
     if (context.org_type) {
-      const orgTypeLabels: Record<string, string> = {
-        for_profit: "For-profit organization",
-        non_profit: "Non-profit organization",
-        government: "Government organization",
-        education: "Educational institution",
-      };
-      orgDetails.push(orgTypeLabels[context.org_type] || context.org_type);
-    }
-    if (context.org_size) {
-      const sizeLabels: Record<string, string> = {
-        small: "Small organization (up to 100 employees)",
-        medium: "Medium organization (101-2,500 employees)",
-        large: "Large organization (2,501+ employees)",
-      };
-      orgDetails.push(sizeLabels[context.org_size] || context.org_size);
-    }
-    if (orgDetails.length > 0) {
-      parts.push(orgDetails.join(", ") + ".");
+      parts.push(`Organization type: ${context.org_type}.`);
     }
 
-    // 5. Tech orientation (helps distinguish tech vs non-tech categories)
-    if (context.tech_orientation) {
-      const techLabels: Record<string, string> = {
-        tech_company: "Technology company",
-        tech_user: "Technology user",
-        non_tech: "Non-technology focused",
-      };
-      parts.push(
-        techLabels[context.tech_orientation] || context.tech_orientation + ".",
-      );
-    }
+    return parts.length > 0 ? parts.join(" ") : "Award category recommendation.";
+  }
 
-    // 6. Operating scope
-    if (context.operating_scope) {
-      const scopeLabels: Record<string, string> = {
-        local: "Local operations",
-        regional: "Regional operations",
-        national: "National operations",
-        international: "International operations",
-      };
-      parts.push(
-        scopeLabels[context.operating_scope] || context.operating_scope + ".",
-      );
-    }
+  /**
+   * Expand focus area phrases with related terms for better semantic overlap with category embeddings.
+   */
+  private expandFocusAreas(focus: string): string {
+    const lower = focus.toLowerCase();
+    const additions: string[] = [];
+    if (lower.includes("innovation")) additions.push("breakthrough achievements", "pioneering work");
+    if (lower.includes("technology") || lower.includes("tech")) additions.push("technology excellence", "technical achievement");
+    if (lower.includes("artificial intelligence") || lower.includes("ai ")) additions.push("machine learning", "intelligent systems");
+    if (lower.includes("customer service")) additions.push("client satisfaction", "customer experience");
+    if (lower.includes("product")) additions.push("product excellence", "product innovation", "new product");
+    if (lower.includes("marketing")) additions.push("marketing excellence", "brand", "growth");
+    if (additions.length === 0) return focus;
+    return [focus, ...additions].join(". ");
+  }
 
-    return parts.join(" ");
+  /**
+   * Expand description with related keywords so short/generic descriptions match category text better.
+   */
+  private expandDescriptionForSearch(description: string): string {
+    const lower = description.toLowerCase();
+    const terms: string[] = [description];
+    if (lower.includes("ai ") || lower.includes("artificial intelligence")) terms.push("machine learning", "intelligent systems", "technology innovation");
+    if (lower.includes("product")) terms.push("product development", "product excellence", "innovation");
+    if (lower.includes("team")) terms.push("team achievement", "collaboration", "excellence");
+    if (lower.includes("customer") || lower.includes("client")) terms.push("customer service", "client satisfaction");
+    if (lower.includes("award") || lower.includes("won") || lower.includes("winner")) terms.push("excellence", "achievement", "recognition");
+    return terms.join(". ");
+  }
+
+  /**
+   * Use LLM to generate a rich search query from user context (more synonyms, context, award-relevant terms).
+   * Improves semantic match when category embeddings are generic. Set RICH_QUERY_EXPANSION=true to enable.
+   */
+  async generateRichSearchQuery(context: UserContext): Promise<string> {
+    const template = this.formatUserQueryText(context, false);
+    const systemPrompt = `You are a search query expander for an award recommendation system. Given the user's nomination context, output a single paragraph (4-6 sentences) that will be embedded and matched against award category descriptions.
+
+Rules:
+- Start with "Focus areas: " and list/expand their focus areas with related terms (e.g. Innovation → breakthrough achievements, pioneering work).
+- Then expand the achievement description with: specific technologies and features, business value, industry context, and award-relevant terms (excellence, achievement, recognition, leadership).
+- Use the same style as category text: concrete nouns, no marketing fluff. Include synonyms so "AI product" also mentions "artificial intelligence", "machine learning", "technology product".
+- End with "Nominating X. Organization type: Y" if known.
+- Output ONLY the paragraph, no markdown, no labels.`;
+
+    const userPrompt = `Expand this nomination context into a rich search paragraph:\n\n${template}`;
+
+    try {
+      const out = await openaiService.chatCompletion({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        model: "gpt-4o-mini",
+        maxTokens: 400,
+        temperature: 0.3,
+      });
+      const trimmed = (out || "").trim();
+      if (trimmed.length > 50) {
+        logger.info("rich_search_query_generated", { length: trimmed.length });
+        return trimmed;
+      }
+    } catch (error: any) {
+      logger.warn("rich_query_expansion_failed", { error: error.message });
+    }
+    return this.formatUserQueryText(context, true);
   }
 
   /**
@@ -178,11 +200,21 @@ export class EmbeddingManager {
     });
 
     try {
-      // Use Node.js OpenAI service instead of Python AI service
-      const embedding = await openaiService.generateEmbedding(text);
+      const embedding = await openaiService.generateEmbedding(
+        text,
+        this.embeddingModel
+      );
 
+      if (embedding.length !== EMBEDDING_DIMENSION) {
+        logger.warn("embedding_dimension_mismatch", {
+          expected: EMBEDDING_DIMENSION,
+          actual: embedding.length,
+          model: this.embeddingModel,
+        });
+      }
       logger.info("embedding_generated", {
         dimension: embedding.length,
+        model: this.embeddingModel,
       });
 
       return embedding;
@@ -196,58 +228,19 @@ export class EmbeddingManager {
 
   /**
    * Generate embedding for user query based on UserContext.
-   * Uses LLM to create natural language query for better semantic matching.
+   * When RICH_QUERY_EXPANSION=true, uses LLM to expand context into a richer paragraph for better semantic match.
+   * Otherwise uses template-based query with synonym expansion.
    */
   async generateUserEmbedding(context: UserContext): Promise<number[]> {
-    // Use LLM to generate natural search query
-    const queryText = await this.generateSearchQuery(context);
+    const useRichExpansion = process.env.RICH_QUERY_EXPANSION === "true" || process.env.RICH_QUERY_EXPANSION === "1";
+    const queryText = useRichExpansion
+      ? await this.generateRichSearchQuery(context)
+      : this.formatUserQueryText(context, true);
     logger.info("generated_search_query", {
-      text: queryText,
-      context: context,
+      text: queryText.substring(0, 300),
+      rich_expansion: useRichExpansion,
     });
     return this.generateEmbedding(queryText);
-  }
-
-  /**
-   * Use LLM to generate a natural language search query from UserContext.
-   * This produces better embeddings than manual string formatting.
-   */
-  private async generateSearchQuery(context: UserContext): Promise<string> {
-    try {
-      // Use Node.js OpenAI service to generate search query
-      const prompt = `Generate a focused search query for finding award categories based on this context:
-
-Description: ${context.description || 'Not provided'}
-Focus Areas: ${context.achievement_focus?.join(', ') || 'Not specified'}
-Nominating: ${context.nomination_subject || 'Not specified'}
-Organization Type: ${context.org_type || 'Not specified'}
-Organization Size: ${context.org_size || 'Not specified'}
-
-Create a search query (2-3 sentences) that emphasizes:
-1. The specific product/innovation/achievement (not just generic "innovation")
-2. The key technologies or focus areas mentioned
-3. The impact or unique value proposition
-4. Relevant industry or domain
-
-Be specific and concrete. Focus on WHAT was built/achieved, not just WHO is being nominated.`;
-
-      const query = await openaiService.chatCompletion({
-        messages: [
-          { role: 'system', content: 'You are a search query generator for award categories. Create specific, concrete queries that emphasize the actual achievement, product, or innovation - not generic terms.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.3,
-        maxTokens: 150,
-      });
-
-      return query.trim();
-    } catch (error: any) {
-      logger.warn("search_query_generation_failed_using_fallback", {
-        error: error.message,
-      });
-      // Fallback to manual formatting if LLM fails
-      return this.formatUserQueryText(context);
-    }
   }
 
   /**

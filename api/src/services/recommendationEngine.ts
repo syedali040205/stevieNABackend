@@ -118,10 +118,10 @@ export class RecommendationEngine {
         throw new Error('UserContext is incomplete. Cannot generate recommendations.');
       }
 
-      // Step 2: No client-side filtering - filtering happens in database
-      logger.info('step_1_database_filtering', {
+      // Step 2: Geography filtering happens in database
+      logger.info('step_1_geography_filtering', {
         geography: context.geography || 'all',
-        note: 'Filtering by geography in database function',
+        note: 'Geographic filtering handled by database search function',
       });
 
       // Step 3: Generate user embedding
@@ -158,9 +158,16 @@ export class RecommendationEngine {
       if (context.geography && context.geography !== 'usa') {
         logger.warn('geography_not_usa_skipping_filter', { 
           geography: context.geography,
-          note: 'Database only has USA categories'
+          note: 'Database only has USA categories, searching all geographies'
         });
       }
+      
+      logger.info('search_parameters', {
+        geography: dbGeography || 'all',
+        nomination_subject: dbNominationSubject,
+        limit: limit,
+        note: 'Searching across ALL programs with boosting for Technology Excellence'
+      });
       
       const similarityResults = await this.embeddingMgr.performSimilaritySearch(
         userEmbedding,
@@ -173,9 +180,23 @@ export class RecommendationEngine {
         results_count: similarityResults.length,
       });
 
-      // Step 5: Format recommendations and deduplicate by category_id
+      // Optional: drop low-similarity results (tune via MIN_SIMILARITY_SCORE, e.g. 0.4–0.6 for cosine)
+      const minScore = parseFloat(process.env.MIN_SIMILARITY_SCORE || '0');
+      let filtered = similarityResults;
+      if (minScore > 0) {
+        filtered = similarityResults.filter((r) => r.similarity_score >= minScore);
+        if (filtered.length < similarityResults.length) {
+          logger.info('low_similarity_filtered', {
+            before: similarityResults.length,
+            after: filtered.length,
+            min_score: minScore,
+          });
+        }
+      }
+
+      // Step 5: Deduplicate by category_id (geography already filtered in DB)
       const seen = new Set<string>();
-      let recommendations: Recommendation[] = similarityResults
+      let recommendations: Recommendation[] = filtered
         .filter((result) => {
           if (seen.has(result.category_id)) {
             logger.info('duplicate_category_filtered', { category_id: result.category_id });

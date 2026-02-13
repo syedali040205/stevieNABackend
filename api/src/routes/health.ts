@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { checkDatabaseHealth } from "../config/supabase";
 import { sessionManager } from "../services/sessionManager";
+import { cacheManager } from "../services/cacheManager";
 import axios from "axios";
 import logger from "../utils/logger";
 
@@ -27,10 +28,59 @@ async function checkAIServiceHealth(): Promise<boolean> {
 }
 
 /**
- * Health check endpoint
+ * Liveness probe (industry standard: process is up).
+ * No dependencies; use for orchestrator liveness.
+ * @route GET /api/health/live
+ */
+router.get("/live", (_req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    status: "ok",
+    service: "stevie-awards-api",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * Readiness probe (industry standard: can accept traffic).
+ * Checks Redis and database; return 503 if either is down so LB stops sending traffic.
+ * @route GET /api/health/ready
+ */
+router.get("/ready", async (_req: Request, res: Response) => {
+  try {
+    const [isRedisHealthy, isDatabaseHealthy] = await Promise.all([
+      cacheManager.healthCheck(),
+      checkDatabaseHealth(),
+    ]);
+
+    const ready = isRedisHealthy && isDatabaseHealthy;
+    const statusCode = ready ? 200 : 503;
+
+    res.status(statusCode).json({
+      success: ready,
+      status: ready ? "ready" : "not_ready",
+      service: "stevie-awards-api",
+      services: {
+        redis: isRedisHealthy ? "healthy" : "unhealthy",
+        database: isDatabaseHealthy ? "healthy" : "unhealthy",
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    logger.error("readiness_check_error", { error: error.message });
+    res.status(503).json({
+      success: false,
+      status: "not_ready",
+      service: "stevie-awards-api",
+      error: "Readiness check failed",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * Health check endpoint (full detail, backward compatible)
  * Verifies database connectivity, session storage, and AI service status
- *
- * Requirements: 7.13, 8.5
  *
  * @route GET /api/health
  * @returns {object} 200 - Service health status
@@ -41,17 +91,18 @@ router.get("/", async (_req: Request, res: Response) => {
     const startTime = Date.now();
 
     // Run all health checks in parallel
-    const [isDatabaseHealthy, isSessionStorageHealthy, isAIServiceHealthy] =
+    const [isDatabaseHealthy, isSessionStorageHealthy, isRedisHealthy, isAIServiceHealthy] =
       await Promise.all([
         checkDatabaseHealth(),
         sessionManager.checkHealth(),
+        cacheManager.healthCheck(),
         checkAIServiceHealth(),
       ]);
 
     const responseTime = Date.now() - startTime;
 
     const allHealthy =
-      isDatabaseHealthy && isSessionStorageHealthy && isAIServiceHealthy;
+      isDatabaseHealthy && isSessionStorageHealthy && isRedisHealthy && isAIServiceHealthy;
 
     const healthStatus = {
       success: true,
@@ -60,16 +111,17 @@ router.get("/", async (_req: Request, res: Response) => {
       services: {
         database: isDatabaseHealthy ? "healthy" : "unhealthy",
         session_storage: isSessionStorageHealthy ? "healthy" : "unhealthy",
+        redis: isRedisHealthy ? "healthy" : "unhealthy",
         ai_service: isAIServiceHealthy ? "healthy" : "unhealthy",
       },
       responseTime: `${responseTime}ms`,
       timestamp: new Date().toISOString(),
     };
 
-    // Return 503 only if database or session storage is down (critical).
+    // Return 503 only if database, session storage, or Redis is down (critical).
     // AI service being down is degraded but not a full outage — the API
     // itself is still reachable and can serve non-AI requests.
-    const criticalHealthy = isDatabaseHealthy && isSessionStorageHealthy;
+    const criticalHealthy = isDatabaseHealthy && isSessionStorageHealthy && isRedisHealthy;
     const statusCode = criticalHealthy ? 200 : 503;
 
     res.status(statusCode).json(healthStatus);
