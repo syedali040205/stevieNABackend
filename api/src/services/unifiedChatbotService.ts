@@ -69,14 +69,26 @@ export class UnifiedChatbotService {
         logger.info('enriched_nomination_subject', { value, source: 'keyword' });
       }
     };
-    if (messageLower.includes('it is a team') || messageLower === 'team' || messageLower.includes('our team') || (messageLower.includes('team') && messageLower.length < 30)) {
+    if (messageLower.includes('it is a team') || messageLower === 'team' || messageLower.includes('our team') || messageLower.includes('my team') || (messageLower.includes('team') && messageLower.length < 30)) {
       setNomination('team');
     } else if (messageLower.includes('it is a product') || messageLower === 'product' || messageLower.includes('our product') || (messageLower.includes('product') && messageLower.length < 30)) {
       setNomination('product');
-    } else if (messageLower.includes('myself') || messageLower.includes('i want to nominate me') || messageLower.includes('nominate myself')) {
+    } else if (messageLower.includes('myself') || messageLower.includes('i want to nominate me') || messageLower.includes('nominate myself') || messageLower === 'individual') {
       setNomination('individual');
-    } else if (messageLower.includes('organization') || messageLower.includes('our organization')) {
+    } else if (messageLower.includes('organization') || messageLower.includes('our organization') || messageLower.includes('my organization')) {
       setNomination('organization');
+    }
+
+    // Extract geography from simple country names
+    if (!enrichedContext.geography) {
+      const commonCountries = ['india', 'pakistan', 'usa', 'united states', 'uk', 'united kingdom', 'canada', 'australia', 'germany', 'france', 'uae', 'dubai', 'china', 'japan', 'singapore'];
+      for (const country of commonCountries) {
+        if (messageLower === country || messageLower.includes(`from ${country}`) || messageLower.includes(`in ${country}`) || messageLower.includes(`based in ${country}`)) {
+          enrichedContext.geography = country.charAt(0).toUpperCase() + country.slice(1);
+          logger.info('enriched_geography', { value: enrichedContext.geography, source: 'keyword' });
+          break;
+        }
+      }
     }
 
     // Extract org_type from short answers to "company, non-profit, or something else?"
@@ -596,7 +608,7 @@ export class UnifiedChatbotService {
 
   /**
    * Check if we should generate recommendations based on context and message.
-   * Simple heuristic: if user mentions wanting recommendations or has enough info.
+   * Triggers when: (1) User has minimum required fields AND (2) User confirms or all fields collected
    */
   private shouldGenerateRecommendations(context: any, message: string): boolean {
     // Check if user is explicitly asking for recommendations
@@ -622,8 +634,7 @@ export class UnifiedChatbotService {
       messageLower.includes('ok') ||
       messageLower.includes('okay');
 
-    // ONLY require: name, email, geography, nomination_subject
-    // Description is optional - we can generate recommendations without it
+    // Minimum required: name, email, nomination_subject, geography
     const hasMinimumInfo = !!(
       context.user_name &&
       context.user_email &&
@@ -631,9 +642,24 @@ export class UnifiedChatbotService {
       context.nomination_subject
     );
 
+    // Check if we have ALL required demographics (not just minimum)
+    const hasAllRequired = !!(
+      context.user_name &&
+      context.user_email &&
+      context.nomination_subject &&
+      context.geography &&
+      context.org_type &&
+      context.career_stage &&
+      context.company_age &&
+      context.org_size &&
+      context.tech_orientation &&
+      context.recognition_scope
+    );
+
     logger.info('recommendation_check', {
       asking: askingForRecommendations,
       has_minimum: hasMinimumInfo,
+      has_all_required: hasAllRequired,
       has_name: !!context.user_name,
       has_email: !!context.user_email,
       has_geography: !!context.geography,
@@ -641,8 +667,10 @@ export class UnifiedChatbotService {
       message: message.substring(0, 50)
     });
 
-    // If user is asking AND we have minimum info (name, email, geography, subject), generate recommendations
-    if (askingForRecommendations && hasMinimumInfo) {
+    // Trigger recommendations if:
+    // 1. User explicitly asks AND has minimum info, OR
+    // 2. User has ALL required fields (auto-trigger)
+    if ((askingForRecommendations && hasMinimumInfo) || hasAllRequired) {
       return true;
     }
 

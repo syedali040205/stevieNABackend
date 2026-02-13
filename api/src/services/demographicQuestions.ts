@@ -45,6 +45,11 @@ export const DEMOGRAPHIC_STEPS: DemographicStep[] = [
     label: 'email',
   },
   {
+    id: 'nomination_subject',
+    umbrellaQuestion: "What are you nominating — yourself (individual), a team, your organization, or a product?",
+    label: 'what you\'re nominating (individual/team/organization/product)',
+  },
+  {
     id: 'geography',
     umbrellaQuestion: "Where are you based, and where does most of your work or business happen?",
     label: 'location / where you\'re based',
@@ -84,11 +89,6 @@ export const DEMOGRAPHIC_STEPS: DemographicStep[] = [
     id: 'recognition_scope',
     umbrellaQuestion: "Are you mainly looking for recognition in the U.S., or are you open to global recognition too?",
     label: 'recognition scope (U.S. vs global)',
-  },
-  {
-    id: 'nomination_subject',
-    umbrellaQuestion: "What are you nominating — yourself (individual), a team, your organization, or a product?",
-    label: 'what you\'re nominating (individual/team/organization/product)',
   },
 ];
 

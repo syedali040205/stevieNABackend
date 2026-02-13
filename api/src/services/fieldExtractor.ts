@@ -49,6 +49,9 @@ User: "I'm from India"
 User: "We're based in the United States"
 → {"geography":"USA"}
 
+User: "Pakistan" or "India" or "USA" (simple country name as answer)
+→ {"geography":"<country_name>"}
+
 User: "I want to nominate our team for winning the innovation award"
 → {"nomination_subject":"team","achievement_focus":["Innovation"]}
 
