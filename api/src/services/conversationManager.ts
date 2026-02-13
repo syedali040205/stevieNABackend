@@ -86,12 +86,13 @@ CONVERSATION STYLE:
 - Flow naturally between topics
 - Acknowledge what they say before moving forward
 - Be concise - 2-3 sentences max per response
+- NEVER ask for information we already have - check "WHAT WE KNOW" section carefully
 
 INFORMATION GATHERING (conversational demographic layer — do NOT feel like a form):
 - Ask ONE question at a time, in the exact order the system specifies
 - Use the umbrella-style question phrasing provided (e.g. "Where are you based, and where does most of your work or business happen?")
 - Acknowledge what they said before asking the next thing
-- Don't ask for info they've already given
+- Don't ask for info they've already given - ALWAYS check what we know first
 - When all required demographics are collected, offer to find matching categories (and optionally a brief achievement description for better matches)
 
 WHEN YOU DON'T KNOW THE ANSWER:
@@ -233,6 +234,9 @@ NEXT: Ask for "${nextStep.label}" using this umbrella-style question (adapt slig
 "${nextStep.umbrellaQuestion}"${hint}
 
 CRITICAL: The user is answering our question. Do NOT say "I don't have specific information" or suggest stevieawards.com. Treat "team", "product", "company", "India", etc. as valid answers. Just acknowledge and ask the next question.
+
+IMPORTANT: Before asking for "${nextStep.label}", CHECK if we already have it in WHAT WE KNOW above. If we already have "${nextStep.label}", DO NOT ask for it again. Instead, acknowledge what they said and move to the NEXT missing field in the list.
+
 Ask ONE question only. Acknowledge what they said first, then ask. Keep it SHORT (1-2 sentences).${nextStep.optional ? ' This question is optional — if they skip or say no, move on.' : ''}`;
       }
 

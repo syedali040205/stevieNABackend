@@ -176,6 +176,13 @@ export class FieldExtractor {
     if (isSimpleNo && needsGenderPrograms) {
       hint = '\n\nHINT: This looks like a "no" response to the women-in-business programs question. Extract: {"gender_programs_opt_in":false}';
     }
+    
+    // Check if this is a short name response (when we don't have user_name yet)
+    const needsName = !userContext.user_name;
+    const isShortName = message.trim().split(' ').length <= 3 && message.length < 50 && !message.includes('@');
+    if (needsName && isShortName) {
+      hint += `\n\nHINT: We're asking for their name and they gave a short response. This is likely their name. Extract: {"user_name":"${message.trim()}"}`;
+    }
 
     return `User message: "${message}"${contextInfo}${hint}
 
