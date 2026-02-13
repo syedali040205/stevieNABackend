@@ -43,11 +43,12 @@ Your job is to determine the conversation MODE based on what the user wants:
 
 ## Decision rules
 
-1. If the user mentions "nominate", "nomination", "find categories", "recommend", "which award" → **recommendation**
-2. If the user asks a factual question with question words (what, when, how much, where) about Stevie Awards processes → **qa**
+1. If the user mentions "nominate", "nomination", "find categories", "recommend", "which award", "want to nominate", "would like to nominate", "apply for", "enter for" → **recommendation**
+2. If the user asks a factual question with question words (what, when, how much, where) about Stevie Awards processes (deadlines, fees, rules, eligibility) → **qa**
 3. If the conversation is already in recommendation mode (collecting demographics) and the user is answering questions → **recommendation** (stay in mode)
 4. If the conversation is in qa mode and the user asks another question → **qa** (stay in mode)
-5. If unclear, default to **recommendation** (it's better to help them find categories than refuse)
+5. If unclear or ambiguous, ALWAYS default to **recommendation** (it's better to help them find categories than refuse)
+6. CRITICAL: "I want to nominate" or "I would like to nominate" is ALWAYS **recommendation**, never qa
 
 ## Context switching
 
@@ -78,14 +79,30 @@ export class ContextClassifier {
     });
 
     // Quick keyword check for obvious recommendation requests
-    const messageLower = message.toLowerCase();
-    const nominationKeywords = ['nominate', 'nomination', 'find categor', 'recommend categor', 'which award', 'what award', 'help me find'];
+    const messageLower = message.toLowerCase().trim();
+    const nominationKeywords = [
+      'nominate', 
+      'nomination', 
+      'find categor', 
+      'recommend categor', 
+      'which award', 
+      'what award', 
+      'help me find',
+      'want to nominate',
+      'would like to nominate',
+      'looking to nominate',
+      'interested in nominating',
+      'apply for',
+      'enter for',
+      'submit for'
+    ];
     const hasNominationKeyword = nominationKeywords.some(kw => messageLower.includes(kw));
     
     if (hasNominationKeyword) {
       logger.info('context_classified_by_keyword', {
         context: 'recommendation',
         keyword_matched: true,
+        message: message.substring(0, 50),
       });
       return {
         context: 'recommendation',

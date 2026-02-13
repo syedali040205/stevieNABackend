@@ -40,6 +40,14 @@ coverage/
 .kiro/
 *.md
 !README.md
+!DEPLOYMENT.md
+!DEPLOY-NOW.md
+!DEPLOY-CHECKLIST.md
+!START-HERE.md
+!README-DEPLOYMENT.md
+!api/PRODUCTION-DEPLOYMENT-GUIDE.md
+!api/START-ADMIN-UI.md
+!api/DEMO-READY-SUMMARY.md
 
 # Temporary files
 *.tmp
@@ -49,6 +57,11 @@ coverage/
 # API specific
 api/dist/
 api/node_modules/
+
+# Admin app specific
+admin-app/.next/
+admin-app/node_modules/
+admin-app/.env.local
 
 # AI Service specific
 ai-service/__pycache__/
