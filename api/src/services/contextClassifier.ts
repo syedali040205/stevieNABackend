@@ -31,27 +31,28 @@ Your job is to determine the conversation MODE based on what the user wants:
 - Figure out which awards to apply for
 - Find the right program for their nomination
 - Get help choosing categories
-- Examples: "help me find categories", "which award should I enter", "recommend categories for my product"
+- Nominate themselves, their team, product, or organization
+- Examples: "help me find categories", "which award should I enter", "recommend categories for my product", "I want to nominate myself", "I'd like to find a nomination", "help me nominate my team"
 
 **qa** - Use when the user wants to:
 - Ask factual questions about Stevie Awards
 - Learn about deadlines, fees, rules, eligibility
 - Understand how the awards work
 - Get information about specific programs
-- Examples: "what is the deadline?", "how much does it cost?", "what are the eligibility requirements?"
+- Examples: "what is the deadline?", "how much does it cost?", "what are the eligibility requirements?", "how does the judging work?"
 
 ## Decision rules
 
-1. If the user explicitly asks for category recommendations or help finding awards → **recommendation**
-2. If the user asks a factual question about Stevie Awards (deadline, cost, rules) → **qa**
+1. If the user mentions "nominate", "nomination", "find categories", "recommend", "which award" → **recommendation**
+2. If the user asks a factual question with question words (what, when, how much, where) about Stevie Awards processes → **qa**
 3. If the conversation is already in recommendation mode (collecting demographics) and the user is answering questions → **recommendation** (stay in mode)
 4. If the conversation is in qa mode and the user asks another question → **qa** (stay in mode)
-5. If unclear, default to **qa** (safer to answer questions than collect demographics)
+5. If unclear, default to **recommendation** (it's better to help them find categories than refuse)
 
 ## Context switching
 
 The user can switch contexts mid-conversation:
-- If in qa mode and they say "help me find categories" → switch to **recommendation**
+- If in qa mode and they say "help me find categories" or "I want to nominate" → switch to **recommendation**
 - If in recommendation mode and they ask "what's the deadline?" → switch to **qa**
 
 ## Output format
@@ -75,6 +76,23 @@ export class ContextClassifier {
       message_length: message.length,
       current_context: currentContext,
     });
+
+    // Quick keyword check for obvious recommendation requests
+    const messageLower = message.toLowerCase();
+    const nominationKeywords = ['nominate', 'nomination', 'find categor', 'recommend categor', 'which award', 'what award', 'help me find'];
+    const hasNominationKeyword = nominationKeywords.some(kw => messageLower.includes(kw));
+    
+    if (hasNominationKeyword) {
+      logger.info('context_classified_by_keyword', {
+        context: 'recommendation',
+        keyword_matched: true,
+      });
+      return {
+        context: 'recommendation',
+        confidence: 0.95,
+        reasoning: 'User mentioned nomination/category keywords',
+      };
+    }
 
     try {
       const userPrompt = this.buildUserPrompt(message, conversationHistory, currentContext, userContext);
@@ -100,11 +118,11 @@ export class ContextClassifier {
     } catch (error: any) {
       logger.error('context_classification_error', { error: error.message });
       
-      // Fallback to qa mode (safer)
+      // Fallback to recommendation mode (more helpful than qa when uncertain)
       return {
-        context: 'qa',
+        context: 'recommendation',
         confidence: 0.3,
-        reasoning: `Classification failed (${error.message}), defaulting to qa`,
+        reasoning: `Classification failed (${error.message}), defaulting to recommendation`,
       };
     }
   }
