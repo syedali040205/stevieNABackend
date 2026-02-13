@@ -522,7 +522,19 @@ export class UnifiedChatbotService {
       }
 
       // Manual context enrichment as workaround for weak field extraction
+      const contextBeforeEnrichment = { ...userContext };
       userContext = this.enrichContextFromConversation(userContext, message, conversationHistory);
+      
+      // Log what changed during enrichment
+      const enrichedFields = Object.keys(userContext).filter(
+        key => userContext[key] !== contextBeforeEnrichment[key] && userContext[key] !== undefined
+      );
+      if (enrichedFields.length > 0) {
+        logger.info('manual_enrichment_applied', { 
+          fields: enrichedFields,
+          values: enrichedFields.reduce((acc, key) => ({ ...acc, [key]: userContext[key] }), {})
+        });
+      }
 
       // Special handling for "no" responses to gender_programs question
       const messageLower = message.toLowerCase().trim();

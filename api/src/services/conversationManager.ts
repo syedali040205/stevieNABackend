@@ -210,6 +210,12 @@ Keep it SHORT and helpful.`;
         if (val === undefined || val === null || val === '') missingLabels.push(step.label);
       }
 
+      logger.info('conversation_manager_state', {
+        next_step: nextStep?.id || 'none',
+        missing_count: missingLabels.length,
+        has_fields: Object.keys(userContext).filter(k => userContext[k] !== undefined && userContext[k] !== null && userContext[k] !== ''),
+      });
+
       if (nextStep !== null) {
         // Build a very strict, simple prompt that forces exact question usage
         return `CONTEXT: User is in recommendation flow. They just said: "${message}"
