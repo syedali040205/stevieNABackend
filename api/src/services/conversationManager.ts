@@ -211,35 +211,30 @@ Keep it SHORT and helpful.`;
       }
 
       if (nextStep !== null) {
-        let hint = '';
-        if (nextStep.id === 'org_type' && userContext.nomination_subject) {
-          hint = ` We already know they're nominating a ${userContext.nomination_subject}. Phrase it as: "Got it — you're nominating a ${userContext.nomination_subject}. Is the organization behind it a company, a non-profit, or something else?"`;
-        }
-        if (nextStep.id === 'achievement_description') {
-          hint = ` This is the MOST IMPORTANT question. Encourage them to share details about: (1) What they accomplished, (2) Impact/results, (3) What makes it innovative/unique, (4) Any challenges overcome. Let them answer naturally - they can share multiple messages if needed. Be encouraging and curious!`;
-        }
-        return `WHAT WE KNOW:
+        // Build a very strict, simple prompt that forces exact question usage
+        return `CONTEXT: User is in recommendation flow. They just said: "${message}"
+
+WHAT WE ALREADY HAVE:
 ${contextSummary}
 
-RECENT CONVERSATION:
-${historySummary}
+NEXT REQUIRED FIELD: ${nextStep.label}
 
-THEY SAID: "${message}"
+YOUR RESPONSE MUST BE EXACTLY:
+1. One sentence acknowledging their answer
+2. Then ask this EXACT question (copy it word-for-word):
 
-THEY WANT RECOMMENDATIONS!
+"${nextStep.umbrellaQuestion}"
 
-STILL NEED (in this order): ${missingLabels.join(', ')}
+DO NOT:
+- Ask about "maturity level" or any other field not listed
+- Rephrase the question
+- Ask for information we already have
+- Repeat questions
 
-NEXT: Ask for "${nextStep.label}" using this umbrella-style question (adapt slightly if needed to sound natural):
-"${nextStep.umbrellaQuestion}"${hint}
+EXAMPLE RESPONSE:
+"Thanks for sharing that! ${nextStep.umbrellaQuestion}"
 
-CRITICAL: The user is answering our question. Do NOT say "I don't have specific information" or suggest stevieawards.com. Treat "team", "product", "company", "India", etc. as valid answers. Just acknowledge and ask the next question.
-
-IMPORTANT: Before asking for "${nextStep.label}", CHECK if we already have it in WHAT WE KNOW above. If we already have "${nextStep.label}", DO NOT ask for it again. Instead, acknowledge what they said and move to the NEXT missing field in the list.
-
-ADAPTIVE RESPONSE: If the user provides MORE information than asked (e.g., they mention achievements, location, or other details), acknowledge ALL of it warmly before asking the next question. Don't ignore extra information they volunteer!
-
-Ask ONE question only. Acknowledge what they said first, then ask. Keep it SHORT (1-2 sentences).${nextStep.optional ? ' This question is optional — if they skip or say no, move on.' : ''}`;
+NOW RESPOND:`;
       }
 
       return `WHAT WE KNOW:

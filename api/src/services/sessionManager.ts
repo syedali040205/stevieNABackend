@@ -1,6 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../config/supabase';
-import { cacheManager } from './cacheManager';
 import logger from '../utils/logger';
 
 /**
@@ -80,28 +79,14 @@ export type ConversationState =
  * Session Manager for handling conversation sessions in Supabase
  * Implements CRUD operations with automatic expiry handling (1 hour TTL)
  * 
- * Caching Strategy (Write-Through Cache):
- * - PostgreSQL: Source of truth, persistence
- * - Redis: Fast read cache (10-100x faster)
- * - Read: Redis → PostgreSQL (cache miss) → cache result
- * - Write: PostgreSQL → Redis (update cache)
- * - Delete: PostgreSQL → Redis (invalidate cache)
+ * Storage: PostgreSQL only (Redis removed for simplicity)
  */
 export class SessionManager {
   private client: SupabaseClient;
   private readonly SESSION_TTL_MS = 3600000; // 1 hour in milliseconds
-  private readonly CACHE_PREFIX = 'session:';
-  private readonly CACHE_TTL = 3600; // 1 hour in seconds (matches session TTL)
 
   constructor(client?: SupabaseClient) {
     this.client = client || getSupabaseClient();
-  }
-
-  /**
-   * Get Redis cache key for session
-   */
-  private getCacheKey(sessionId: string): string {
-    return `${this.CACHE_PREFIX}${sessionId}`;
   }
 
   /**
@@ -141,12 +126,8 @@ export class SessionManager {
     }
 
     const session = data as Session;
-
-    // Cache the new session in Redis
-    const cacheKey = this.getCacheKey(session.id);
-    await cacheManager.set(cacheKey, session, this.CACHE_TTL);
     
-    logger.info('session_created_and_cached', { 
+    logger.info('session_created', { 
       session_id: session.id,
       user_id: userId 
     });
@@ -156,23 +137,10 @@ export class SessionManager {
 
   /**
    * Retrieve a session by ID
-   * Uses Redis cache for fast reads, falls back to PostgreSQL on cache miss
    * @param sessionId - Session UUID
    * @returns Session if found and not expired, null otherwise
    */
   async getSession(sessionId: string): Promise<Session | null> {
-    const cacheKey = this.getCacheKey(sessionId);
-
-    // Try Redis cache first
-    const cachedSession = await cacheManager.get<Session>(cacheKey);
-    if (cachedSession) {
-      logger.debug('session_cache_hit', { session_id: sessionId });
-      return cachedSession;
-    }
-
-    logger.debug('session_cache_miss', { session_id: sessionId });
-
-    // Cache miss - fetch from PostgreSQL
     const { data, error } = await this.client
       .from('user_sessions')
       .select('*')
@@ -189,18 +157,14 @@ export class SessionManager {
     }
 
     const session = data as Session;
-
-    // Cache the session for future reads
-    await cacheManager.set(cacheKey, session, this.CACHE_TTL);
     
-    logger.info('session_fetched_and_cached', { session_id: sessionId });
+    logger.debug('session_fetched', { session_id: sessionId });
 
     return session;
   }
 
   /**
    * Update session with new UserContext and conversation history
-   * Updates PostgreSQL and Redis cache
    * @param sessionId - Session UUID
    * @param sessionData - Updated session data
    * @param conversationState - Updated conversation state
@@ -231,19 +195,14 @@ export class SessionManager {
     }
 
     const session = data as Session;
-
-    // Update cache with new session data
-    const cacheKey = this.getCacheKey(sessionId);
-    await cacheManager.set(cacheKey, session, this.CACHE_TTL);
     
-    logger.debug('session_updated_and_cached', { session_id: sessionId });
+    logger.debug('session_updated', { session_id: sessionId });
 
     return session;
   }
 
   /**
    * Delete a session (e.g., after recommendations are delivered)
-   * Removes from PostgreSQL and invalidates Redis cache
    * @param sessionId - Session UUID
    * @returns True if deleted successfully
    */
@@ -256,12 +215,8 @@ export class SessionManager {
     if (error) {
       throw new Error(`Failed to delete session: ${error.message}`);
     }
-
-    // Invalidate cache
-    const cacheKey = this.getCacheKey(sessionId);
-    await cacheManager.delete(cacheKey);
     
-    logger.info('session_deleted_and_cache_invalidated', { session_id: sessionId });
+    logger.info('session_deleted', { session_id: sessionId });
 
     return true;
   }
@@ -323,7 +278,6 @@ export class SessionManager {
 
   /**
    * Extend session expiry by 1 hour
-   * Updates PostgreSQL and Redis cache
    * @param sessionId - Session UUID
    * @returns Updated session
    */
@@ -348,36 +302,10 @@ export class SessionManager {
     }
 
     const session = data as Session;
-
-    // Update cache with extended expiry
-    const cacheKey = this.getCacheKey(sessionId);
-    await cacheManager.set(cacheKey, session, this.CACHE_TTL);
     
-    logger.info('session_extended_and_cached', { session_id: sessionId });
+    logger.info('session_extended', { session_id: sessionId });
 
     return session;
-  }
-
-  /**
-   * Invalidate cache for a specific session
-   * Useful when you want to force a fresh read from PostgreSQL
-   * @param sessionId - Session UUID
-   */
-  async invalidateCache(sessionId: string): Promise<void> {
-    const cacheKey = this.getCacheKey(sessionId);
-    await cacheManager.delete(cacheKey);
-    logger.debug('session_cache_invalidated', { session_id: sessionId });
-  }
-
-  /**
-   * Invalidate all session caches
-   * Useful for maintenance or when you need to clear all cached sessions
-   */
-  async invalidateAllCaches(): Promise<number> {
-    const pattern = `${this.CACHE_PREFIX}*`;
-    const deletedCount = await cacheManager.deletePattern(pattern);
-    logger.info('all_session_caches_invalidated', { count: deletedCount });
-    return deletedCount;
   }
 }
 

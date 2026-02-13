@@ -124,6 +124,55 @@ export class UnifiedChatbotService {
         logger.info('enriched_org_type', { value: 'for_profit', source: 'keyword' });
       }
     }
+
+    // Extract company_age from short answers like "12 years", "5 years", "2 months"
+    if (!enrichedContext.company_age) {
+      const trimmed = currentMessage.trim();
+      // Match patterns like "12 years", "5 years", "2 months", "1 year"
+      const agePattern = /(\d+)\s*(year|years|month|months|yr|yrs)/i;
+      const match = trimmed.match(agePattern);
+      if (match && trimmed.length < 50) {
+        enrichedContext.company_age = trimmed;
+        logger.info('enriched_company_age', { value: trimmed, source: 'pattern_match' });
+      }
+    }
+
+    // Extract career_stage from short answers like "5 years", "10 years"
+    if (!enrichedContext.career_stage) {
+      const trimmed = currentMessage.trim();
+      const careerPattern = /(\d+)\s*(year|years|yr|yrs)/i;
+      const match = trimmed.match(careerPattern);
+      if (match && trimmed.length < 50) {
+        enrichedContext.career_stage = trimmed;
+        logger.info('enriched_career_stage', { value: trimmed, source: 'pattern_match' });
+      }
+    }
+
+    // Extract org_size from short answers like "3 people", "5 peeps", "10 employees"
+    if (!enrichedContext.org_size) {
+      const trimmed = currentMessage.trim();
+      const sizePattern = /(\d+)\s*(people|peeps|person|employees|employee|members|member|staff)/i;
+      const match = trimmed.match(sizePattern);
+      if (match && trimmed.length < 50) {
+        enrichedContext.org_size = trimmed;
+        logger.info('enriched_org_size', { value: trimmed, source: 'pattern_match' });
+      }
+    }
+
+    // Extract tech_orientation from short answers like "AI based", "tech focused", "minimal tech"
+    if (!enrichedContext.tech_orientation) {
+      const trimmed = messageLower.trim();
+      if (trimmed.includes('ai') || trimmed.includes('artificial intelligence') || trimmed.includes('machine learning')) {
+        enrichedContext.tech_orientation = 'AI/ML focused';
+        logger.info('enriched_tech_orientation', { value: 'AI/ML focused', source: 'keyword' });
+      } else if (trimmed.includes('tech') && (trimmed.includes('central') || trimmed.includes('core') || trimmed.includes('based') || trimmed.includes('focused'))) {
+        enrichedContext.tech_orientation = 'Technology-centric';
+        logger.info('enriched_tech_orientation', { value: 'Technology-centric', source: 'keyword' });
+      } else if (trimmed.includes('minimal') || trimmed.includes('not really') || trimmed.includes('not much')) {
+        enrichedContext.tech_orientation = 'Minimal technology';
+        logger.info('enriched_tech_orientation', { value: 'Minimal technology', source: 'keyword' });
+      }
+    }
     
     // Build comprehensive description from conversation history if missing or too short
     // BUT: Don't auto-fill if we haven't explicitly asked for achievement_description yet
