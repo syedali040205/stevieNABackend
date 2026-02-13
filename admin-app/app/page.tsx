@@ -24,8 +24,10 @@ interface Stats {
 }
 
 export default function Home() {
-  const [apiUrl, setApiUrl] = useState('');
-  const [apiKey, setApiKey] = useState('');
+  // Get from environment variables
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+  const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY || '';
+  
   const [documents, setDocuments] = useState<Document[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,17 +40,9 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    // Load from localStorage
-    const savedApiUrl = localStorage.getItem('apiUrl');
-    const savedApiKey = localStorage.getItem('apiKey');
-    if (savedApiUrl) setApiUrl(savedApiUrl);
-    if (savedApiKey) setApiKey(savedApiKey);
+    // Auto-load documents on mount
+    loadData();
   }, []);
-
-  const saveConfig = () => {
-    localStorage.setItem('apiUrl', apiUrl);
-    localStorage.setItem('apiKey', apiKey);
-  };
 
   const showMessage = (text: string, type: 'success' | 'error') => {
     setMessage({ text, type });
@@ -57,11 +51,10 @@ export default function Home() {
 
   const loadData = async () => {
     if (!apiUrl || !apiKey) {
-      showMessage('Please enter API URL and API Key', 'error');
+      showMessage('❌ API configuration missing. Check environment variables.', 'error');
       return;
     }
 
-    saveConfig();
     setLoading(true);
 
     try {
@@ -87,7 +80,7 @@ export default function Home() {
 
   const handleUpload = async () => {
     if (!apiUrl || !apiKey) {
-      showMessage('Please configure API settings first', 'error');
+      showMessage('❌ API configuration missing. Check environment variables.', 'error');
       return;
     }
 
@@ -164,40 +157,13 @@ export default function Home() {
         {/* Header */}
         <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">📚 Stevie Awards - Document Manager</h1>
-          <p className="text-gray-600">Manage KB documents across Supabase, Pinecone, and S3</p>
-        </div>
-
-        {/* Configuration */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">⚙️ Configuration</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">API URL</label>
-              <input
-                type="text"
-                value={apiUrl}
-                onChange={(e) => setApiUrl(e.target.value)}
-                placeholder="https://your-api.com"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Internal API Key</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="stevie-internal-key-2024-secure"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              />
-            </div>
-          </div>
+          <p className="text-gray-600">Upload and manage KB documents</p>
           <button
             onClick={loadData}
             disabled={loading}
-            className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition"
+            className="mt-4 bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition"
           >
-            {loading ? '🔄 Loading...' : '🔄 Load Documents'}
+            {loading ? '🔄 Refreshing...' : '🔄 Refresh'}
           </button>
         </div>
 
@@ -284,7 +250,7 @@ export default function Home() {
               <svg className="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              <p>No documents found. Click "Load Documents" to get started.</p>
+              <p>No documents found. Upload your first document above!</p>
             </div>
           ) : (
             <div className="space-y-3">
