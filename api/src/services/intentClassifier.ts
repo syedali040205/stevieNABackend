@@ -48,15 +48,16 @@ Your ONLY job is to read the user's latest message, consider the conversation so
 
 ## Decision rules (apply in order)
 
-1. If the message is purely social ("hi", "thanks", "bye") → **greeting**.
-2. If the assistant just asked a yes/no question or offered to do something, and the user replies with a short confirmation → **affirmative**.
-3. Same as above but the user declines → **negative**.
-4. If the user asks the assistant to clarify or repeat its own previous response → **clarification**.
-5. If the user explicitly asks for category recommendations, matches, or "where should I enter" → **recommendation**.
-6. If the message contains a factual question about Stevie Awards AND also provides nomination details → **mixed**.
-7. If the message is purely a question about Stevie Awards → **question**.
-8. If the message provides nomination-relevant info without asking a factual question → **information**.
-9. If none of the above apply → **off_topic**.
+1. **Stick to one flow:** If the conversation stage shows we are in the middle of collecting nomination/demographic info (assistant has been asking for name, email, location, org type, team size, what they're nominating, etc.) and the user's message looks like an *answer* to that kind of question (e.g. "team", "product", "company", "India", "a few years", "yes we're tech-heavy") — classify as **information**, NOT question. Only use **question** when the user is clearly asking a factual question about Stevie Awards (e.g. "what is the deadline?", "how much does it cost?").
+2. If the message is purely social ("hi", "thanks", "bye") → **greeting**.
+3. If the assistant just asked a yes/no question or offered to do something, and the user replies with a short confirmation → **affirmative**.
+4. Same as above but the user declines → **negative**.
+5. If the user asks the assistant to clarify or repeat its own previous response → **clarification**.
+6. If the user explicitly asks for category recommendations, matches, or "where should I enter" → **recommendation**.
+7. If the message contains a factual question about Stevie Awards AND also provides nomination details → **mixed** (unless rule 1 applies).
+8. If the message is purely a question about Stevie Awards (programs, fees, rules, deadlines) → **question** (unless rule 1 applies).
+9. If the message provides nomination-relevant info without asking a factual question → **information**.
+10. If none of the above apply → **off_topic**.
 
 ## Output format
 
@@ -147,6 +148,10 @@ export class IntentClassifier {
       geography: 'Geography',
       org_type: 'Org type',
       org_size: 'Org size',
+      career_stage: 'Career stage',
+      company_age: 'Company age',
+      tech_orientation: 'Tech orientation',
+      recognition_scope: 'Recognition scope',
       nomination_subject: 'Nomination subject',
       description: 'Achievement description',
       achievement_focus: 'Focus areas',
@@ -176,6 +181,7 @@ export class IntentClassifier {
     if (missing.length > 0) {
       lines.push('Still missing:');
       lines.push(...missing);
+      lines.push('We are in the middle of collecting info — short replies (e.g. "team", "product", "company", "India") are likely answers to our questions; classify as information.');
     } else {
       lines.push('All key fields have been collected.');
     }

@@ -225,6 +225,10 @@ Keep it SHORT and helpful.`;
       }
 
       if (nextStep) {
+        let hint = '';
+        if (nextStep.id === 'org_type' && userContext.nomination_subject) {
+          hint = ` We already know they're nominating a ${userContext.nomination_subject}. Phrase it as: "Got it — you're nominating a ${userContext.nomination_subject}. Is the organization behind it a company, a non-profit, or something else?"`;
+        }
         return `WHAT WE KNOW:
 ${contextSummary}
 
@@ -238,8 +242,9 @@ THEY WANT RECOMMENDATIONS!
 STILL NEED (in this order): ${missingLabels.join(', ')}
 
 NEXT: Ask for "${nextStep.label}" using this umbrella-style question (adapt slightly if needed to sound natural):
-"${nextStep.umbrellaQuestion}"
+"${nextStep.umbrellaQuestion}"${hint}
 
+CRITICAL: The user is answering our question. Do NOT say "I don't have specific information" or suggest stevieawards.com. Treat "team", "product", "company", "India", etc. as valid answers. Just acknowledge and ask the next question.
 Ask ONE question only. Acknowledge what they said first, then ask. Keep it SHORT (1-2 sentences).${nextStep.optional ? ' This question is optional — if they skip or say no, move on.' : ''}`;
       }
 
@@ -298,9 +303,15 @@ DO NOT provide specific facts, dates, deadlines, fees, or eligibility details. Y
       }
       const missingText = missingLabels.length > 0 ? missingLabels.join(', ') : 'nothing — we have everything!';
 
-      const nextInstruction = nextStep
-        ? `Ask for the NEXT item in order: "${nextStep.label}". Use this phrasing (adapt naturally): "${nextStep.umbrellaQuestion}". ONE question only.`
-        : 'We have all required demographics. Offer to find matching categories (and optionally a brief achievement description for better matches).';
+      let nextInstruction: string;
+      if (nextStep) {
+        nextInstruction = `Ask for the NEXT item in order: "${nextStep.label}". Use this phrasing (adapt naturally): "${nextStep.umbrellaQuestion}". ONE question only.`;
+        if (nextStep.id === 'org_type' && userContext.nomination_subject) {
+          nextInstruction += ` We already know they're nominating a ${userContext.nomination_subject}; you can say "Got it — you're nominating a ${userContext.nomination_subject}. Is the organization behind it a company, a non-profit, or something else?"`;
+        }
+      } else {
+        nextInstruction = 'We have all required demographics. Offer to find matching categories (and optionally a brief achievement description for better matches).';
+      }
 
       return `WHAT WE KNOW:
 ${contextSummary}
@@ -311,6 +322,8 @@ ${historySummary}
 THEY JUST SAID: "${message}"
 
 STILL NEED: ${missingText}
+
+CRITICAL: The user is answering OUR demographic question. Do NOT say "I don't have specific information about X" or suggest stevieawards.com or help@stevieawards.com. Just acknowledge their answer and ask for the next item. Treat "team", "product", "company", "individual" as valid answers (nomination subject or org type).
 
 Respond naturally:
 1. Acknowledge what they just shared (briefly!)

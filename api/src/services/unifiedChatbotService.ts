@@ -9,6 +9,7 @@ import { openaiService } from './openaiService';
 import { intentClassifier } from './intentClassifier';
 import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
+import { getFirstMissingStep } from './demographicQuestions';
 import crypto from 'crypto';
 
 /**
@@ -62,20 +63,38 @@ export class UnifiedChatbotService {
     const enrichedContext = { ...context };
     const messageLower = currentMessage.toLowerCase();
     
-    // Extract nomination_subject from keywords
-    if (!enrichedContext.nomination_subject) {
-      if (messageLower.includes('team') || messageLower.includes('our team')) {
-        enrichedContext.nomination_subject = 'team';
-        logger.info('enriched_nomination_subject', { value: 'team', source: 'keyword' });
-      } else if (messageLower.includes('product') || messageLower.includes('our product')) {
-        enrichedContext.nomination_subject = 'product';
-        logger.info('enriched_nomination_subject', { value: 'product', source: 'keyword' });
-      } else if (messageLower.includes('myself') || messageLower.includes('i want to nominate me')) {
-        enrichedContext.nomination_subject = 'individual';
-        logger.info('enriched_nomination_subject', { value: 'individual', source: 'keyword' });
-      } else if (messageLower.includes('organization') || messageLower.includes('company')) {
-        enrichedContext.nomination_subject = 'organization';
-        logger.info('enriched_nomination_subject', { value: 'organization', source: 'keyword' });
+    // Extract nomination_subject from keywords (including short answers to "what are you nominating?" / "company or non-profit?")
+    const setNomination = (value: 'individual' | 'team' | 'organization' | 'product') => {
+      if (!enrichedContext.nomination_subject) {
+        enrichedContext.nomination_subject = value;
+        logger.info('enriched_nomination_subject', { value, source: 'keyword' });
+      }
+    };
+    if (messageLower.includes('it is a team') || messageLower === 'team' || messageLower.includes('our team') || (messageLower.includes('team') && messageLower.length < 30)) {
+      setNomination('team');
+    } else if (messageLower.includes('it is a product') || messageLower === 'product' || messageLower.includes('our product') || (messageLower.includes('product') && messageLower.length < 30)) {
+      setNomination('product');
+    } else if (messageLower.includes('myself') || messageLower.includes('i want to nominate me') || messageLower.includes('nominate myself')) {
+      setNomination('individual');
+    } else if (messageLower.includes('organization') || messageLower.includes('our organization')) {
+      setNomination('organization');
+    }
+
+    // Extract org_type from short answers to "company, non-profit, or something else?"
+    if (!enrichedContext.org_type) {
+      const trimmed = messageLower.trim();
+      if (trimmed.includes('non-profit') || trimmed.includes('nonprofit') || trimmed === 'non profit') {
+        enrichedContext.org_type = 'non_profit';
+        logger.info('enriched_org_type', { value: 'non_profit', source: 'keyword' });
+      } else if (trimmed.includes('startup') || trimmed === 'we\'re a startup') {
+        enrichedContext.org_type = 'startup';
+        logger.info('enriched_org_type', { value: 'startup', source: 'keyword' });
+      } else if (trimmed.includes('government') || trimmed.includes('public sector')) {
+        enrichedContext.org_type = 'government';
+        logger.info('enriched_org_type', { value: 'government', source: 'keyword' });
+      } else if (trimmed === 'company' || trimmed === 'it\'s a company' || trimmed === 'a company' || (trimmed.includes('company') && trimmed.length < 40)) {
+        enrichedContext.org_type = 'for_profit';
+        logger.info('enriched_org_type', { value: 'for_profit', source: 'keyword' });
       }
     }
     
@@ -333,11 +352,43 @@ export class UnifiedChatbotService {
 
       // Step 2: Classify intent (Node.js - no Python hop!)
       logger.info('step_1_classifying_intent');
-      const intent = await intentClassifier.classifyIntent({
+      let intent = await intentClassifier.classifyIntent({
         message,
         conversationHistory,
         userContext,
       });
+
+      // Intent locking: if we're in the middle of collecting demographics for recommendations,
+      // stay in that flow. Don't switch to "question" (KB search) when the user is answering
+      // our demographic questions (e.g. "team", "product", "company").
+      const nextMissing = getFirstMissingStep(userContext, true);
+      const hasAnyDemographic =
+        !!(userContext.user_name || userContext.user_email || userContext.geography || userContext.nomination_subject);
+      const lastAssistantMessage = conversationHistory
+        .filter((m) => m.role === 'assistant')
+        .slice(-1)[0]?.content?.toLowerCase() ?? '';
+      const assistantWasAskingDemographics =
+        /what'?s your name|your email|email address|company,? a non-profit|where are you based|how long (have|has)|how big is the team|technology play|recognition in the|nominating (yourself|a )?(team|product|individual|organization)/i.test(lastAssistantMessage) ||
+        lastAssistantMessage.includes('non-profit') ||
+        lastAssistantMessage.includes('organization behind');
+
+      const inRecommendationFlow =
+        (nextMissing !== null && hasAnyDemographic) ||
+        (conversationHistory.length >= 2 && assistantWasAskingDemographics);
+
+      if (inRecommendationFlow && (intent.intent === 'question' || intent.intent === 'mixed')) {
+        logger.info('intent_locked_to_information', {
+          original_intent: intent.intent,
+          reason: 'mid_demographic_flow',
+          has_any_demographic: hasAnyDemographic,
+          assistant_was_asking: assistantWasAskingDemographics,
+        });
+        intent = {
+          ...intent,
+          intent: 'information',
+          reasoning: intent.reasoning ? `${intent.reasoning} [Overridden: staying in recommendation flow.]` : 'Staying in recommendation flow.',
+        };
+      }
 
       logger.info('intent_classified', {
         intent: intent.intent,
@@ -351,7 +402,7 @@ export class UnifiedChatbotService {
         confidence: intent.confidence,
       };
 
-      // Step 3: If question intent, search KB
+      // Step 3: If question intent, search KB (only when NOT locked to information)
       let kbArticles: any[] | null = null;
       
       if (intent.intent === 'question' || intent.intent === 'mixed') {
