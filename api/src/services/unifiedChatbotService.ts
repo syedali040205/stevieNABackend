@@ -384,6 +384,15 @@ export class UnifiedChatbotService {
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
 
+      // Detect previous context from conversation history
+      const previousContext = conversationHistory.length > 0
+        ? conversationHistory[conversationHistory.length - 1].role === 'assistant'
+          ? conversationHistory[conversationHistory.length - 2]?.content.toLowerCase().includes('stevie awards')
+            ? 'qa'
+            : 'recommendation'
+          : undefined
+        : undefined;
+
       // Step 2: Classify context (recommendation vs qa)
       logger.info('step_1_classifying_context');
       const context = await contextClassifier.classifyContext({
@@ -393,10 +402,31 @@ export class UnifiedChatbotService {
         userContext,
       });
 
+      // Detect context switch
+      const contextSwitched = previousContext && previousContext !== context.context;
+
       logger.info('context_classified', {
         context: context.context,
         confidence: context.confidence,
+        previousContext,
+        switched: contextSwitched,
       });
+
+      // If switching TO recommendation context, clear demographic fields to start fresh
+      if (contextSwitched && context.context === 'recommendation') {
+        logger.info('context_switch_detected_clearing_demographics', {
+          from: previousContext,
+          to: context.context,
+        });
+        
+        // Keep only profile fields (geography, organization_name, job_title)
+        // Clear all demographic collection fields
+        userContext = {
+          geography: userContext.geography,
+          organization_name: userContext.organization_name,
+          job_title: userContext.job_title,
+        };
+      }
 
       // Yield context to client (frontend expects 'intent' field for backward compatibility)
       yield {
