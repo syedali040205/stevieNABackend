@@ -237,6 +237,8 @@ CRITICAL: The user is answering our question. Do NOT say "I don't have specific 
 
 IMPORTANT: Before asking for "${nextStep.label}", CHECK if we already have it in WHAT WE KNOW above. If we already have "${nextStep.label}", DO NOT ask for it again. Instead, acknowledge what they said and move to the NEXT missing field in the list.
 
+ADAPTIVE RESPONSE: If the user provides MORE information than asked (e.g., they mention achievements, location, or other details), acknowledge ALL of it warmly before asking the next question. Don't ignore extra information they volunteer!
+
 Ask ONE question only. Acknowledge what they said first, then ask. Keep it SHORT (1-2 sentences).${nextStep.optional ? ' This question is optional — if they skip or say no, move on.' : ''}`;
       }
 

@@ -91,6 +91,22 @@ export class UnifiedChatbotService {
       }
     }
 
+    // Auto-fill recognition_scope based on geography if not set
+    // Non-US countries typically want global recognition
+    if (!enrichedContext.recognition_scope && enrichedContext.geography) {
+      const geoLower = enrichedContext.geography.toLowerCase();
+      if (geoLower === 'usa' || geoLower === 'united states') {
+        enrichedContext.recognition_scope = 'both'; // US can do both
+      } else {
+        enrichedContext.recognition_scope = 'global'; // Non-US typically wants global
+      }
+      logger.info('enriched_recognition_scope', { 
+        value: enrichedContext.recognition_scope, 
+        geography: enrichedContext.geography,
+        source: 'geography_inference' 
+      });
+    }
+
     // Extract org_type from short answers to "company, non-profit, or something else?"
     if (!enrichedContext.org_type) {
       const trimmed = messageLower.trim();
