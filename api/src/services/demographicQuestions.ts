@@ -50,14 +50,22 @@ export const DEMOGRAPHIC_STEPS: DemographicStep[] = [
     label: 'what you\'re nominating (individual/team/organization/product)',
   },
   {
+    id: 'achievement_description',
+    umbrellaQuestion: "Tell me about the specific achievements or contributions you'd like to highlight. What makes this nomination special?",
+    label: 'achievement description',
+  },
+  // Optional fields - only ask if needed for better recommendations
+  {
     id: 'org_type',
     umbrellaQuestion: "Is this a company, a non-profit, or something else?",
     label: 'organization type (company, non-profit, startup, etc.)',
+    optional: true,
   },
   {
     id: 'career_stage',
     umbrellaQuestion: "How long have you been doing this kind of work?",
     label: 'career stage / experience',
+    optional: true,
   },
   {
     id: 'gender_programs',
@@ -69,26 +77,25 @@ export const DEMOGRAPHIC_STEPS: DemographicStep[] = [
     id: 'company_age',
     umbrellaQuestion: "How long has the organization been around?",
     label: 'company age / maturity',
+    optional: true,
   },
   {
     id: 'org_size',
     umbrellaQuestion: "Roughly how big is the team right now?",
     label: 'team size',
+    optional: true,
   },
   {
     id: 'tech_orientation',
     umbrellaQuestion: "Does technology play a central role in what you do?",
     label: 'technology orientation',
+    optional: true,
   },
   {
     id: 'recognition_scope',
     umbrellaQuestion: "Are you mainly looking for recognition in the U.S., or are you open to global recognition too?",
     label: 'recognition scope (U.S. vs global)',
-  },
-  {
-    id: 'achievement_description',
-    umbrellaQuestion: "Tell me about the specific achievements or contributions you'd like to highlight. What makes this nomination special?",
-    label: 'achievement description',
+    optional: true,
   },
 ];
 
@@ -140,12 +147,13 @@ export function hasRequiredDemographics(context: Record<string, any>): boolean {
 /**
  * Minimum needed to generate category recommendations.
  * Geography comes from user profile, so not in DEMOGRAPHIC_STEPS.
+ * Only requires: name, email, nomination_subject, description
  */
 export function hasMinimumForRecommendations(context: Record<string, any>): boolean {
   return !!(
     context.user_name &&
     context.user_email &&
-    context.geography &&  // From user profile
-    context.nomination_subject
+    context.nomination_subject &&
+    context.description  // Achievement description is essential for good recommendations
   );
 }

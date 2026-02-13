@@ -461,15 +461,17 @@ export class UnifiedChatbotService {
         switched: contextSwitched,
       });
 
-      // If switching TO recommendation context, clear demographic fields to start fresh
-      if (contextSwitched && context.context === 'recommendation') {
-        logger.info('context_switch_detected_clearing_demographics', {
-          from: previousContext,
+      // If switching TO recommendation context OR first time in recommendation, clear demographics to start fresh
+      if (context.context === 'recommendation' && (contextSwitched || !previousContext)) {
+        logger.info('entering_recommendation_context_clearing_demographics', {
+          from: previousContext || 'none',
           to: context.context,
+          is_switch: contextSwitched,
+          is_first_time: !previousContext,
         });
         
+        // Clear ALL demographic fields to force starting from name
         // Keep only profile fields (geography, organization_name, job_title)
-        // Clear all demographic collection fields
         userContext = {
           geography: userContext.geography,
           organization_name: userContext.organization_name,
@@ -714,7 +716,7 @@ export class UnifiedChatbotService {
 
   /**
    * Check if we should generate recommendations based on context and message.
-   * Triggers when: (1) User has minimum required fields AND (2) User confirms or all fields collected
+   * Triggers when: User has minimum required fields (name, email, nomination_subject, description)
    */
   private shouldGenerateRecommendations(context: any, message: string): boolean {
     // Check if user is explicitly asking for recommendations
@@ -740,44 +742,27 @@ export class UnifiedChatbotService {
       messageLower.includes('ok') ||
       messageLower.includes('okay');
 
-    // Minimum required: name, email, nomination_subject, geography
+    // Minimum required: name, email, nomination_subject, description
     const hasMinimumInfo = !!(
       context.user_name &&
       context.user_email &&
-      context.geography &&
-      context.nomination_subject
-    );
-
-    // Check if we have ALL required demographics (not just minimum)
-    const hasAllRequired = !!(
-      context.user_name &&
-      context.user_email &&
       context.nomination_subject &&
-      context.geography &&  // From user profile
-      context.org_type &&
-      context.career_stage &&
-      context.company_age &&
-      context.org_size &&
-      context.tech_orientation &&
-      context.recognition_scope &&
-      context.description  // Achievement description
+      context.description
     );
 
     logger.info('recommendation_check', {
       asking: askingForRecommendations,
       has_minimum: hasMinimumInfo,
-      has_all_required: hasAllRequired,
       has_name: !!context.user_name,
       has_email: !!context.user_email,
-      has_geography: !!context.geography,
       has_nomination_subject: !!context.nomination_subject,
+      has_description: !!context.description,
       message: message.substring(0, 50)
     });
 
-    // Trigger recommendations if:
-    // 1. User explicitly asks AND has minimum info, OR
-    // 2. User has ALL required fields (auto-trigger)
-    if ((askingForRecommendations && hasMinimumInfo) || hasAllRequired) {
+    // Trigger recommendations if user has minimum info and confirms
+    // OR if they explicitly ask for recommendations
+    if (hasMinimumInfo && (askingForRecommendations || context.description.length > 20)) {
       return true;
     }
 
