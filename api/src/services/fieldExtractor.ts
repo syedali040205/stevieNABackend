@@ -167,21 +167,24 @@ export class FieldExtractor {
       ? `\n\nContext already collected:\n${contextParts.join('\n')}\n\nDon't extract fields we already have.`
       : '';
 
-    // Check if this is a simple "no" response to the gender_programs question
-    const messageLower = message.toLowerCase().trim();
-    const isSimpleNo = messageLower === 'no' || messageLower === 'no dont' || messageLower === 'nope';
-    const needsGenderPrograms = userContext.gender_programs_opt_in === undefined || userContext.gender_programs_opt_in === null;
-    
+    // Build hint based on what we're currently missing
     let hint = '';
-    if (isSimpleNo && needsGenderPrograms) {
-      hint = '\n\nHINT: This looks like a "no" response to the women-in-business programs question. Extract: {"gender_programs_opt_in":false}';
-    }
     
-    // Check if this is a short name response (when we don't have user_name yet)
-    const needsName = !userContext.user_name;
-    const isShortName = message.trim().split(' ').length <= 3 && message.length < 50 && !message.includes('@');
-    if (needsName && isShortName) {
-      hint += `\n\nHINT: We're asking for their name and they gave a short response. This is likely their name. Extract: {"user_name":"${message.trim()}"}`;
+    // If we're missing a field and the message is short/simple, give context
+    const messageLower = message.toLowerCase().trim();
+    
+    if (!userContext.user_name) {
+      hint += '\n\nWe just asked for their name. If this is a short response, it\'s likely their name.';
+    } else if (!userContext.user_email) {
+      hint += '\n\nWe just asked for their email. If this looks like an email, extract it.';
+    } else if (!userContext.nomination_subject) {
+      hint += '\n\nWe just asked what they\'re nominating. Look for: individual, team, organization, or product.';
+    } else if (!userContext.org_type) {
+      hint += '\n\nWe just asked about organization type. Look for: company, non-profit, startup, government.';
+    } else if (userContext.gender_programs_opt_in === undefined || userContext.gender_programs_opt_in === null) {
+      if (messageLower === 'no' || messageLower === 'nope' || messageLower === 'no dont' || messageLower === 'no don\'t') {
+        hint += '\n\nThis is a "no" response to the women-in-business programs question. Extract: {"gender_programs_opt_in":false}';
+      }
     }
 
     return `User message: "${message}"${contextInfo}${hint}
