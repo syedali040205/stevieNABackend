@@ -716,31 +716,25 @@ export class UnifiedChatbotService {
 
   /**
    * Check if we should generate recommendations based on context and message.
-   * Triggers when: User has minimum required fields (name, email, nomination_subject, description)
+   * STRICT: Only generate when user explicitly confirms they want recommendations.
+   * DO NOT auto-generate on every message.
    */
   private shouldGenerateRecommendations(context: any, message: string): boolean {
     // Check if user is explicitly asking for recommendations
-    const messageLower = message.toLowerCase();
+    const messageLower = message.toLowerCase().trim();
     const askingForRecommendations = 
-      messageLower.includes('yes') ||
-      messageLower.includes('yeah') ||
-      messageLower.includes('yep') ||
-      messageLower.includes('yup') ||
-      messageLower.includes('sure') ||
-      messageLower.includes('please') ||
-      messageLower.includes('pls') ||
-      messageLower.includes('plz') ||
-      messageLower.includes('recommend') ||
-      messageLower.includes('categor') ||
-      messageLower.includes('which award') ||
-      messageLower.includes('what award') ||
-      messageLower.includes('figure out') ||
+      messageLower === 'yes' ||
+      messageLower === 'yeah' ||
+      messageLower === 'yep' ||
+      messageLower === 'yup' ||
+      messageLower === 'sure' ||
+      messageLower === 'ok' ||
+      messageLower === 'okay' ||
       messageLower.includes('show me') ||
-      messageLower.includes('find') ||
-      messageLower.includes('go ahead') ||
-      messageLower.includes('do it') ||
-      messageLower.includes('ok') ||
-      messageLower.includes('okay');
+      messageLower.includes('find categor') ||
+      messageLower.includes('recommend') ||
+      messageLower.includes('which categor') ||
+      messageLower.includes('what categor');
 
     // Minimum required: name, email, nomination_subject, description
     const hasMinimumInfo = !!(
@@ -760,9 +754,9 @@ export class UnifiedChatbotService {
       message: message.substring(0, 50)
     });
 
-    // Trigger recommendations if user has minimum info and confirms
-    // OR if they explicitly ask for recommendations
-    if (hasMinimumInfo && (askingForRecommendations || context.description.length > 20)) {
+    // ONLY trigger if user explicitly asks AND has minimum info
+    // DO NOT auto-trigger just because we have all fields
+    if (askingForRecommendations && hasMinimumInfo) {
       return true;
     }
 

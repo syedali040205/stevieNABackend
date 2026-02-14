@@ -251,9 +251,11 @@ ${historySummary}
 
 THEY SAID: "${message}"
 
-We have all demographic info needed for program and category recommendations!
+We have all required info (name, email, nomination subject, achievement description) to generate category recommendations!
 
-Respond warmly. You may say you have what you need and will find the best matching categories (and which Stevie programs fit them). If we don't have a brief achievement description yet, you can optionally ask for a sentence or two to improve category fit — then offer to generate recommendations. Keep it to 1-2 sentences. When they confirm, the system will generate recommendations.`;
+Respond warmly in 1-2 sentences. Tell them you have what you need and ASK if they'd like you to find matching categories now. Make it a clear yes/no question.
+
+Example: "Perfect! I have everything I need. Would you like me to find the best matching Stevie Award categories for your nomination?"`;
     } else {
       // qa context
       const kbContext = this.buildKBContext(kbArticles);
