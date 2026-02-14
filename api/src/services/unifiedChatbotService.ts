@@ -565,7 +565,7 @@ export class UnifiedChatbotService {
       }
 
       // Step 5: Check if ready for recommendations
-      if (this.shouldGenerateRecommendations(userContext, message)) {
+      if (await this.shouldGenerateRecommendations(userContext, message)) {
         logger.info('generating_recommendations');
         
         yield {
@@ -716,26 +716,9 @@ export class UnifiedChatbotService {
 
   /**
    * Check if we should generate recommendations based on context and message.
-   * STRICT: Only generate when user explicitly confirms they want recommendations.
-   * DO NOT auto-generate on every message.
+   * Uses LLM to detect if user is confirming they want recommendations.
    */
-  private shouldGenerateRecommendations(context: any, message: string): boolean {
-    // Check if user is explicitly asking for recommendations
-    const messageLower = message.toLowerCase().trim();
-    const askingForRecommendations = 
-      messageLower === 'yes' ||
-      messageLower === 'yeah' ||
-      messageLower === 'yep' ||
-      messageLower === 'yup' ||
-      messageLower === 'sure' ||
-      messageLower === 'ok' ||
-      messageLower === 'okay' ||
-      messageLower.includes('show me') ||
-      messageLower.includes('find categor') ||
-      messageLower.includes('recommend') ||
-      messageLower.includes('which categor') ||
-      messageLower.includes('what categor');
-
+  private async shouldGenerateRecommendations(context: any, message: string): Promise<boolean> {
     // Minimum required: name, email, nomination_subject, description
     const hasMinimumInfo = !!(
       context.user_name &&
@@ -744,23 +727,52 @@ export class UnifiedChatbotService {
       context.description
     );
 
-    logger.info('recommendation_check', {
-      asking: askingForRecommendations,
-      has_minimum: hasMinimumInfo,
-      has_name: !!context.user_name,
-      has_email: !!context.user_email,
-      has_nomination_subject: !!context.nomination_subject,
-      has_description: !!context.description,
-      message: message.substring(0, 50)
-    });
-
-    // ONLY trigger if user explicitly asks AND has minimum info
-    // DO NOT auto-trigger just because we have all fields
-    if (askingForRecommendations && hasMinimumInfo) {
-      return true;
+    // If we don't have minimum info, can't generate recommendations
+    if (!hasMinimumInfo) {
+      logger.info('recommendation_check_no_minimum_info', {
+        has_name: !!context.user_name,
+        has_email: !!context.user_email,
+        has_nomination_subject: !!context.nomination_subject,
+        has_description: !!context.description,
+      });
+      return false;
     }
 
-    return false;
+    // Use LLM to detect if user is confirming they want recommendations
+    try {
+      const prompt = `Analyze if the user is confirming they want to see category recommendations or if they're doing something else (asking a question, providing more info, etc.).
+
+User message: "${message}"
+
+Is this a confirmation to proceed with showing recommendations?
+
+Respond with ONLY "yes" or "no".
+
+Guidelines:
+- "yes" = User is agreeing, confirming, or explicitly requesting to see categories/recommendations
+- "no" = User is asking questions, providing additional information, or discussing something else`;
+
+      const response = await openaiService.chatCompletion({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'gpt-4o-mini',
+        maxTokens: 10,
+        temperature: 0,
+      });
+
+      const isConfirming = response.trim().toLowerCase() === 'yes';
+
+      logger.info('recommendation_check', {
+        asking: isConfirming,
+        has_minimum: hasMinimumInfo,
+        message: message.substring(0, 50)
+      });
+
+      return isConfirming;
+    } catch (error: any) {
+      logger.error('recommendation_check_error', { error: error.message });
+      // Fallback: don't generate recommendations on error
+      return false;
+    }
   }
 
   /**
