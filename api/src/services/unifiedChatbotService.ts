@@ -678,10 +678,10 @@ export class UnifiedChatbotService {
       // Cache miss - generate embedding and search Pinecone
       const embedding = await openaiService.generateEmbedding(message);
 
-      // Search Pinecone
+      // Search Pinecone (increased from 5 to 10 for better recall)
       const pineconeResults = await pineconeClient.query(
         embedding,
-        5,
+        10,
         { content_type: 'kb_article' }
       );
 
