@@ -442,14 +442,22 @@ export class UnifiedChatbotService {
           : undefined
         : undefined;
 
-      // Step 2: Classify context (recommendation vs qa)
-      logger.info('step_1_classifying_context');
-      const context = await contextClassifier.classifyContext({
-        message,
-        conversationHistory,
-        currentContext: undefined, // Context is determined dynamically, not stored in session
-        userContext,
-      });
+      // Step 2: Classify context and extract fields in parallel (independent operations)
+      logger.info('step_1_parallel_processing');
+      const [context, extractedFields] = await Promise.all([
+        // Context classification
+        contextClassifier.classifyContext({
+          message,
+          conversationHistory,
+          currentContext: undefined,
+          userContext,
+        }),
+        // Field extraction (runs in parallel)
+        fieldExtractor.extractFields({
+          message,
+          userContext,
+        }),
+      ]);
 
       // Detect context switch
       const contextSwitched = previousContext && previousContext !== context.context;
@@ -498,12 +506,8 @@ export class UnifiedChatbotService {
         });
       }
 
-      // Step 3.5: Extract fields and enrich context BEFORE generating response
-      logger.info('step_3_extracting_fields');
-      const extractedFields = await fieldExtractor.extractFields({
-        message,
-        userContext,
-      });
+      // Step 3.5: Update context with extracted fields (already extracted in parallel)
+      logger.info('step_3_applying_extracted_fields');
 
       // Debug only: avoid PII in production logs (see SCALING-ROADMAP Security)
       logger.debug('extracted_fields_detail', {
