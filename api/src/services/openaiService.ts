@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import logger from '../utils/logger';
 import { createCircuitBreaker } from '../utils/circuitBreaker';
 import { openaiTokensTotal } from '../utils/metrics';
+import { cacheManager } from './cacheManager';
 
 const OPENAI_TIMEOUT_MS = 30000; // 30s (industry practice: timeout all outbound calls)
 const RETRY_MAX_ATTEMPTS = 3;
@@ -145,16 +146,32 @@ export class OpenAIService {
   }
 
   /**
-   * Generate embedding for text. Uses retry + circuit breaker.
+   * Generate embedding for text. Uses retry + circuit breaker + Redis cache.
    */
   async generateEmbedding(text: string, model = 'text-embedding-ada-002'): Promise<number[]> {
+    // Check cache first
+    const cached = await cacheManager.getEmbedding(text, model);
+    if (cached) {
+      logger.debug('embedding_cache_hit', { text_length: text.length, model });
+      return cached;
+    }
+
+    // Cache miss - call OpenAI
     try {
       const r = await openaiCircuitBreaker.fire(() =>
         retryWithBackoff(() => this.client.embeddings.create({ model, input: text }))
       );
       const total = r?.usage?.total_tokens ?? 0;
       if (total > 0) openaiTokensTotal.inc({ type: 'prompt' }, total);
-      return r.data[0].embedding;
+      
+      const embedding = r.data[0].embedding;
+      
+      // Store in cache (fire and forget - don't block on cache write)
+      cacheManager.setEmbedding(text, model, embedding).catch((err) => {
+        logger.warn('embedding_cache_write_failed', { error: err.message });
+      });
+      
+      return embedding;
     } catch (error: any) {
       logger.error('openai_embedding_error', { error: error.message, text_length: text.length });
       throw error;
@@ -162,7 +179,7 @@ export class OpenAIService {
   }
 
   /**
-   * Generate embeddings for multiple texts (batched). Uses retry + circuit breaker per batch.
+   * Generate embeddings for multiple texts (batched). Uses retry + circuit breaker + Redis cache per batch.
    */
   async generateEmbeddings(
     texts: string[],
@@ -173,16 +190,55 @@ export class OpenAIService {
 
     for (let i = 0; i < texts.length; i += batchSize) {
       const batch = texts.slice(i, i + batchSize);
-      try {
-        const r = await openaiCircuitBreaker.fire(() =>
-          retryWithBackoff(() => this.client.embeddings.create({ model, input: batch }))
-        );
-        const total = r?.usage?.total_tokens ?? 0;
-        if (total > 0) openaiTokensTotal.inc({ type: 'prompt' }, total);
-        embeddings.push(...r.data.map((d: { embedding: number[] }) => d.embedding));
-      } catch (error: any) {
-        logger.error('openai_batch_embedding_error', { error: error.message, count: texts.length });
-        throw error;
+      
+      // Check cache for each text in batch
+      const cachedResults: (number[] | null)[] = await Promise.all(
+        batch.map(text => cacheManager.getEmbedding(text, model))
+      );
+      
+      // Separate cached vs uncached
+      const uncachedIndices: number[] = [];
+      const uncachedTexts: string[] = [];
+      cachedResults.forEach((cached, idx) => {
+        if (cached) {
+          embeddings.push(cached);
+        } else {
+          uncachedIndices.push(embeddings.length);
+          uncachedTexts.push(batch[idx]);
+          embeddings.push([]); // placeholder
+        }
+      });
+      
+      if (uncachedTexts.length > 0) {
+        logger.debug('embedding_batch_cache_miss', { 
+          total: batch.length, 
+          cached: batch.length - uncachedTexts.length,
+          uncached: uncachedTexts.length 
+        });
+        
+        try {
+          const r = await openaiCircuitBreaker.fire(() =>
+            retryWithBackoff(() => this.client.embeddings.create({ model, input: uncachedTexts }))
+          );
+          const total = r?.usage?.total_tokens ?? 0;
+          if (total > 0) openaiTokensTotal.inc({ type: 'prompt' }, total);
+          
+          // Fill in placeholders with fresh embeddings
+          r.data.forEach((d: { embedding: number[] }, idx: number) => {
+            const embeddingIdx = uncachedIndices[idx];
+            embeddings[embeddingIdx] = d.embedding;
+            
+            // Cache each embedding (fire and forget)
+            cacheManager.setEmbedding(uncachedTexts[idx], model, d.embedding).catch((err) => {
+              logger.warn('embedding_batch_cache_write_failed', { error: err.message });
+            });
+          });
+        } catch (error: any) {
+          logger.error('openai_batch_embedding_error', { error: error.message, count: texts.length });
+          throw error;
+        }
+      } else {
+        logger.debug('embedding_batch_full_cache_hit', { count: batch.length });
       }
     }
 

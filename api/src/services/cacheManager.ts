@@ -1,11 +1,15 @@
 import Redis from 'ioredis';
+import crypto from 'crypto';
 import logger from '../utils/logger';
 
 /**
  * Redis Cache Manager
  * 
- * Handles caching for FAQ responses and document metadata.
- * Uses Redis for fast in-memory caching with TTL support.
+ * Handles caching for:
+ * - OpenAI embeddings (7 day TTL)
+ * - KB search results (1 hour TTL)
+ * - Session data (1 hour TTL)
+ * - Rate limiting (60 second windows)
  * 
  * GRACEFUL DEGRADATION: If Redis is unavailable, all operations return null/false
  * and the system continues without caching.
@@ -15,14 +19,20 @@ export class CacheManager {
   private defaultTTL: number = 3600; // 1 hour default
   private redisAvailable: boolean = false;
 
+  // TTL constants
+  private readonly EMBEDDING_TTL = 7 * 24 * 3600; // 7 days
+  private readonly SESSION_TTL = 3600; // 1 hour
+  private readonly RATE_LIMIT_WINDOW = 60; // 60 seconds
+
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     const redisPassword = process.env.REDIS_PASSWORD || '';
     const redisDb = parseInt(process.env.REDIS_DB || '0', 10);
 
-    // Skip Redis initialization if URL is not set or is localhost (production without Redis)
-    if (!process.env.REDIS_URL || redisUrl.includes('localhost')) {
-      logger.info('redis_disabled', { reason: 'REDIS_URL not set or localhost' });
+    // Skip Redis initialization if URL is not set
+    // Allow localhost for development
+    if (!process.env.REDIS_URL) {
+      logger.info('redis_disabled', { reason: 'REDIS_URL not set' });
       this.redisAvailable = false;
       return;
     }
@@ -71,7 +81,169 @@ export class CacheManager {
   }
 
   /**
-   * Get cached value by key
+   * Generate cache key for embeddings
+   * Format: emb:{model}:{sha256(normalized_text)}
+   */
+  private getEmbeddingKey(text: string, model: string): string {
+    const normalized = text.trim().toLowerCase();
+    const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+    return `emb:${model}:${hash}`;
+  }
+
+  /**
+   * Get cached embedding
+   */
+  async getEmbedding(text: string, model: string): Promise<number[] | null> {
+    if (!this.redisAvailable || !this.redis) {
+      return null;
+    }
+
+    const key = this.getEmbeddingKey(text, model);
+    
+    try {
+      const value = await this.redis.get(key);
+      if (!value) {
+        return null;
+      }
+      const embedding = JSON.parse(value) as number[];
+      logger.info('embedding_cache_hit', { 
+        text_length: text.length,
+        model,
+        key_hash: key.substring(0, 20) 
+      });
+      return embedding;
+    } catch (error: any) {
+      logger.error('embedding_cache_get_error', { error: error.message });
+      return null;
+    }
+  }
+
+  /**
+   * Cache embedding with 7 day TTL
+   */
+  async setEmbedding(text: string, model: string, embedding: number[]): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+
+    const key = this.getEmbeddingKey(text, model);
+    
+    try {
+      const serialized = JSON.stringify(embedding);
+      await this.redis.setex(key, this.EMBEDDING_TTL, serialized);
+      logger.debug('embedding_cached', { 
+        text_length: text.length,
+        model,
+        dimension: embedding.length 
+      });
+      return true;
+    } catch (error: any) {
+      logger.error('embedding_cache_set_error', { error: error.message });
+      return false;
+    }
+  }
+
+  /**
+   * Rate limiting using Redis atomic operations
+   * Key format: rate:{ip}:{route}
+   * Returns: { allowed: boolean, remaining: number, resetAt: number }
+   */
+  async checkRateLimit(
+    ip: string, 
+    route: string, 
+    limit: number = 30
+  ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+    if (!this.redisAvailable || !this.redis) {
+      // Graceful degradation: allow request if Redis unavailable
+      return { allowed: true, remaining: limit, resetAt: Date.now() + this.RATE_LIMIT_WINDOW * 1000 };
+    }
+
+    const key = `rate:${ip}:${route}`;
+    
+    try {
+      // Atomic increment
+      const count = await this.redis.incr(key);
+      
+      // Set TTL on first request
+      if (count === 1) {
+        await this.redis.expire(key, this.RATE_LIMIT_WINDOW);
+      }
+      
+      const ttl = await this.redis.ttl(key);
+      const resetAt = Date.now() + (ttl * 1000);
+      const remaining = Math.max(0, limit - count);
+      const allowed = count <= limit;
+
+      if (!allowed) {
+        logger.warn('rate_limit_exceeded', { ip, route, count, limit });
+      }
+
+      return { allowed, remaining, resetAt };
+    } catch (error: any) {
+      logger.error('rate_limit_check_error', { error: error.message });
+      // Graceful degradation: allow request on error
+      return { allowed: true, remaining: limit, resetAt: Date.now() + this.RATE_LIMIT_WINDOW * 1000 };
+    }
+  }
+
+  /**
+   * Session management
+   * Key format: sess:{sessionId}
+   */
+  async getSession<T>(sessionId: string): Promise<T | null> {
+    if (!this.redisAvailable || !this.redis) {
+      return null;
+    }
+
+    const key = `sess:${sessionId}`;
+    
+    try {
+      const value = await this.redis.get(key);
+      if (!value) {
+        return null;
+      }
+      return JSON.parse(value) as T;
+    } catch (error: any) {
+      logger.error('session_get_error', { sessionId, error: error.message });
+      return null;
+    }
+  }
+
+  async setSession(sessionId: string, data: any): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+
+    const key = `sess:${sessionId}`;
+    
+    try {
+      const serialized = JSON.stringify(data);
+      await this.redis.setex(key, this.SESSION_TTL, serialized);
+      return true;
+    } catch (error: any) {
+      logger.error('session_set_error', { sessionId, error: error.message });
+      return false;
+    }
+  }
+
+  async deleteSession(sessionId: string): Promise<boolean> {
+    if (!this.redisAvailable || !this.redis) {
+      return false;
+    }
+
+    const key = `sess:${sessionId}`;
+    
+    try {
+      await this.redis.del(key);
+      return true;
+    } catch (error: any) {
+      logger.error('session_delete_error', { sessionId, error: error.message });
+      return false;
+    }
+  }
+
+  /**
+   * Get cached value by key (generic)
    */
   async get<T>(key: string): Promise<T | null> {
     if (!this.redisAvailable || !this.redis) {
@@ -91,7 +263,7 @@ export class CacheManager {
   }
 
   /**
-   * Set cached value with TTL
+   * Set cached value with TTL (generic)
    */
   async set(key: string, value: any, ttl?: number): Promise<boolean> {
     if (!this.redisAvailable || !this.redis) {
@@ -250,6 +422,13 @@ export class CacheManager {
       logger.error('redis_health_check_failed', { error: error.message });
       return false;
     }
+  }
+
+  /**
+   * Check if Redis is available
+   */
+  isAvailable(): boolean {
+    return this.redisAvailable;
   }
 }
 

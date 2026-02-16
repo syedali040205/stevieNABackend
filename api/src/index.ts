@@ -59,6 +59,7 @@ import documentsRouter from "./routes/documents";
 import diagnosticRouter from "./routes/diagnostic";
 import internalRouter from "./routes/internal";
 import ragDiagnosticRouter from "./routes/rag-diagnostic";
+import redisHealthRouter from "./routes/redis-health";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -161,6 +162,7 @@ app.use("/api/users", usersRouter);
 app.use("/api/documents", documentsRouter);
 app.use("/api/diagnostic", diagnosticRouter);
 app.use("/api/rag-diagnostic", ragDiagnosticRouter);
+app.use("/api", redisHealthRouter);
 app.use("/api", unifiedChatbotRouter);
 
 // Root endpoint

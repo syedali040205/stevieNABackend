@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../config/supabase';
 import logger from '../utils/logger';
+import { cacheManager } from './cacheManager';
 
 /**
  * UserContext structure extracted from conversation
@@ -137,10 +138,19 @@ export class SessionManager {
 
   /**
    * Retrieve a session by ID
+   * Checks Redis cache first, falls back to database
    * @param sessionId - Session UUID
    * @returns Session if found and not expired, null otherwise
    */
   async getSession(sessionId: string): Promise<Session | null> {
+    // Try Redis cache first
+    const cached = await cacheManager.getSession<Session>(sessionId);
+    if (cached) {
+      logger.debug('session_cache_hit', { session_id: sessionId });
+      return cached;
+    }
+
+    // Cache miss - query database
     const { data, error } = await this.client
       .from('user_sessions')
       .select('*')
@@ -158,6 +168,11 @@ export class SessionManager {
 
     const session = data as Session;
     
+    // Store in Redis cache (fire and forget)
+    cacheManager.setSession(sessionId, session).catch((err) => {
+      logger.warn('session_cache_write_failed', { error: err.message });
+    });
+    
     logger.debug('session_fetched', { session_id: sessionId });
 
     return session;
@@ -165,6 +180,7 @@ export class SessionManager {
 
   /**
    * Update session with new UserContext and conversation history
+   * Updates both database and Redis cache
    * @param sessionId - Session UUID
    * @param sessionData - Updated session data
    * @param conversationState - Updated conversation state
@@ -196,6 +212,11 @@ export class SessionManager {
 
     const session = data as Session;
     
+    // Update Redis cache (fire and forget)
+    cacheManager.setSession(sessionId, session).catch((err) => {
+      logger.warn('session_cache_update_failed', { error: err.message });
+    });
+    
     logger.debug('session_updated', { session_id: sessionId });
 
     return session;
@@ -203,6 +224,7 @@ export class SessionManager {
 
   /**
    * Delete a session (e.g., after recommendations are delivered)
+   * Removes from both database and Redis cache
    * @param sessionId - Session UUID
    * @returns True if deleted successfully
    */
@@ -215,6 +237,11 @@ export class SessionManager {
     if (error) {
       throw new Error(`Failed to delete session: ${error.message}`);
     }
+    
+    // Delete from Redis cache (fire and forget)
+    cacheManager.deleteSession(sessionId).catch((err) => {
+      logger.warn('session_cache_delete_failed', { error: err.message });
+    });
     
     logger.info('session_deleted', { session_id: sessionId });
 
