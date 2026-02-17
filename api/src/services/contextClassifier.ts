@@ -3,11 +3,11 @@ import logger from '../utils/logger';
 
 /**
  * Context Classifier Service
- * 
+ *
  * Determines the conversation context/mode:
  * - recommendation: User wants to find award categories (collect demographics → generate recommendations)
  * - qa: User wants to ask questions about Stevie Awards (answer from knowledge base)
- * 
+ *
  * The system can dynamically switch between modes based on user intent.
  */
 
@@ -70,8 +70,9 @@ export class ContextClassifier {
     conversationHistory: Array<{ role: string; content: string }>;
     currentContext?: ConversationContext;
     userContext: any;
+    signal?: AbortSignal;
   }): Promise<ContextResult> {
-    const { message, conversationHistory, currentContext, userContext } = params;
+    const { message, conversationHistory, currentContext, userContext, signal } = params;
 
     logger.info('classifying_context', {
       message_length: message.length,
@@ -81,12 +82,12 @@ export class ContextClassifier {
     // Quick keyword check for obvious recommendation requests
     const messageLower = message.toLowerCase().trim();
     const nominationKeywords = [
-      'nominate', 
-      'nomination', 
-      'find categor', 
-      'recommend categor', 
-      'which award', 
-      'what award', 
+      'nominate',
+      'nomination',
+      'find categor',
+      'recommend categor',
+      'which award',
+      'what award',
       'help me find',
       'want to nominate',
       'would like to nominate',
@@ -94,10 +95,10 @@ export class ContextClassifier {
       'interested in nominating',
       'apply for',
       'enter for',
-      'submit for'
+      'submit for',
     ];
-    const hasNominationKeyword = nominationKeywords.some(kw => messageLower.includes(kw));
-    
+    const hasNominationKeyword = nominationKeywords.some((kw) => messageLower.includes(kw));
+
     if (hasNominationKeyword) {
       logger.info('context_classified_by_keyword', {
         context: 'recommendation',
@@ -121,6 +122,7 @@ export class ContextClassifier {
         ],
         temperature: 0.0,
         maxTokens: 100,
+        signal,
       });
 
       const result = this.parseResponse(response);
@@ -133,8 +135,11 @@ export class ContextClassifier {
 
       return result;
     } catch (error: any) {
+      // Abort should propagate so the route can stop work.
+      if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+
       logger.error('context_classification_error', { error: error.message });
-      
+
       // Fallback to recommendation mode (more helpful than qa when uncertain)
       return {
         context: 'recommendation',
@@ -158,7 +163,7 @@ export class ContextClassifier {
     // Current context
     if (currentContext) {
       parts.push(`Current context: ${currentContext}`);
-      
+
       if (currentContext === 'recommendation') {
         const collected = this.getCollectedFields(userContext);
         if (collected.length > 0) {
@@ -197,13 +202,13 @@ export class ContextClassifier {
    */
   private getCollectedFields(context: any): string[] {
     const fields: string[] = [];
-    
+
     if (context.user_name) fields.push('name');
     if (context.user_email) fields.push('email');
     if (context.geography) fields.push('location');
     if (context.org_type) fields.push('org type');
     if (context.nomination_subject) fields.push('nomination subject');
-    
+
     return fields;
   }
 

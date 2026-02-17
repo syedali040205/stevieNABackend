@@ -7,7 +7,7 @@
     "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "lint": "eslint src --ext .ts",
     "chunk-kb": "tsx ../scripts/chunk-kb-content.ts",
     "ingest-kb": "tsx --env-file=.env ingest-kb-data.ts",

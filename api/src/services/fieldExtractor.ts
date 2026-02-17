@@ -3,7 +3,7 @@ import logger from '../utils/logger';
 
 /**
  * Field Extractor Service
- * 
+ *
  * Extracts structured fields from user messages using OpenAI.
  * Identifies nomination details like subject, description, org info, etc.
  */
@@ -16,7 +16,7 @@ Your job is to extract structured information from the user's message and return
 
 - **user_name**: User's full name (string)
 - **user_email**: User's email address (string, must be valid email format)
-- **geography**: Where they're based / where work happens (string, e.g., "India", "USA", "UAE", "Germany", "US and Europe")
+- **geography**: Where they're based / where work happens (string, e.g., "India", "USA", "UAE", "Germany")
 - **nomination_subject**: What they're nominating (values: "individual", "team", "organization", "product")
 - **description**: Description of the achievement or nomination (string, 20-500 chars)
 - **org_type**: Organization type (values: "for_profit", "non_profit", "government", "startup", "education")
@@ -28,50 +28,43 @@ Your job is to extract structured information from the user's message and return
 - **recognition_scope**: "us_only", "global", or "both"
 - **achievement_focus**: Array of focus areas (e.g., ["Innovation", "Technology", "Customer Service"])
 
-## Rules:
+## Critical Rules:
 
-1. Only extract fields that are explicitly mentioned or strongly implied
-2. Don't guess or infer beyond what's clearly stated
-3. Return ONLY the fields you found - omit fields you didn't find
-4. For achievement_focus, extract multiple areas if mentioned
-5. Keep descriptions concise but informative
-6. For user_email, validate it's a proper email format (contains @ and domain)
-7. For geography, extract country name (e.g., "India", "USA", "United Kingdom", "UAE")
+1. **Use conversation history**: Look at what the assistant just asked to understand what the user is answering
+2. **Context is key**: The same word can mean different things depending on what question was asked
+3. **Don't duplicate**: If we already have a field, don't extract it again unless the user is correcting it
+4. Only extract fields that are explicitly mentioned or clearly implied from the conversation
+5. Return ONLY the fields you found - omit fields you didn't find
+6. Keep descriptions concise but informative
 
-## Examples:
+## Examples with conversation context:
 
-User: "My name is John Smith and my email is john@company.com"
-→ {"user_name":"John Smith","user_email":"john@company.com"}
+Conversation:
+assistant: "What are you nominating — yourself, a team, your organization, or a product?"
+user: "team"
+→ {"nomination_subject":"team"}
 
-User: "I'm from India"
-→ {"geography":"India"}
+Conversation:
+assistant: "Is this a company, a non-profit, or something else?"
+user: "team"
+Already have: nomination_subject="team"
+→ {"org_type":"for_profit"}
+(User is confused, they meant "company" but said "team" because that's what they're nominating)
 
-User: "We're based in the United States"
-→ {"geography":"USA"}
+Conversation:
+assistant: "What's your name?"
+user: "John Smith"
+→ {"user_name":"John Smith"}
 
-User: "Pakistan" or "India" or "USA" (simple country name as answer)
-→ {"geography":"<country_name>"}
+Conversation:
+assistant: "Could you share your email?"
+user: "john@company.com"
+→ {"user_email":"john@company.com"}
 
-User: "I want to nominate our team for winning the innovation award"
-→ {"nomination_subject":"team","achievement_focus":["Innovation"]}
-
-User: "We're a small startup that developed an AI-powered mirror"
-→ {"org_type":"startup","org_size":"small","achievement_focus":["Artificial Intelligence","Product Innovation"]}
-
-User: "I've been in this field for about 6 years"
-→ {"career_stage":"few_years"}
-
-User: "Yes, consider women in business awards too"
-→ {"gender_programs_opt_in":true}
-
-User: "No" or "no dont" or "NO" (when asked about women-in-business programs)
+Conversation:
+assistant: "Some programs are for women leaders. Want me to consider those?"
+user: "no"
 → {"gender_programs_opt_in":false}
-
-User: "We're very tech-heavy" or "Technology is central to what we do"
-→ {"tech_orientation":"central"}
-
-User: "Mainly US" or "Open to global recognition"
-→ {"recognition_scope":"us_only"} or {"recognition_scope":"global"}
 
 ## Output format:
 
@@ -87,15 +80,17 @@ export class FieldExtractor {
   async extractFields(params: {
     message: string;
     userContext: any;
+    conversationHistory?: Array<{ role: string; content: string }>;
+    signal?: AbortSignal;
   }): Promise<Record<string, any>> {
-    const { message, userContext } = params;
+    const { message, userContext, conversationHistory = [], signal } = params;
 
     logger.info('extracting_fields', {
       message_length: message.length,
     });
 
     try {
-      const userPrompt = this.buildUserPrompt(message, userContext);
+      const userPrompt = this.buildUserPrompt(message, userContext, conversationHistory);
 
       const response = await openaiService.chatCompletion({
         messages: [
@@ -104,6 +99,7 @@ export class FieldExtractor {
         ],
         temperature: 0.0,
         maxTokens: 300,
+        signal,
       });
 
       const extracted = this.parseResponse(response);
@@ -115,6 +111,7 @@ export class FieldExtractor {
 
       return extracted;
     } catch (error: any) {
+      if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
       logger.error('field_extraction_error', { error: error.message });
       return {};
     }
@@ -123,7 +120,11 @@ export class FieldExtractor {
   /**
    * Build user prompt
    */
-  private buildUserPrompt(message: string, userContext: any): string {
+  private buildUserPrompt(
+    message: string,
+    userContext: any,
+    conversationHistory: Array<{ role: string; content: string }>
+  ): string {
     const contextParts: string[] = [];
 
     if (userContext.user_name) {
@@ -163,33 +164,24 @@ export class FieldExtractor {
       contextParts.push(`Already have description: ${userContext.description.substring(0, 100)}`);
     }
 
-    const contextInfo = contextParts.length > 0 
-      ? `\n\nContext already collected:\n${contextParts.join('\n')}\n\nDon't extract fields we already have.`
-      : '';
+    const contextInfo =
+      contextParts.length > 0
+        ? `\n\nFields already collected:\n${contextParts.join('\n')}`
+        : '';
 
-    // Build hint based on what we're currently missing
-    let hint = '';
-    
-    // If we're missing a field and the message is short/simple, give context
-    const messageLower = message.toLowerCase().trim();
-    
-    if (!userContext.user_name) {
-      hint += '\n\nWe just asked for their name. If this is a short response, it\'s likely their name.';
-    } else if (!userContext.user_email) {
-      hint += '\n\nWe just asked for their email. If this looks like an email, extract it.';
-    } else if (!userContext.nomination_subject) {
-      hint += '\n\nWe just asked what they\'re nominating. Look for: individual, team, organization, or product.';
-    } else if (!userContext.org_type) {
-      hint += '\n\nWe just asked about organization type. Look for: company, non-profit, startup, government.';
-    } else if (userContext.gender_programs_opt_in === undefined || userContext.gender_programs_opt_in === null) {
-      if (messageLower === 'no' || messageLower === 'nope' || messageLower === 'no dont' || messageLower === 'no don\'t') {
-        hint += '\n\nThis is a "no" response to the women-in-business programs question. Extract: {"gender_programs_opt_in":false}';
-      }
-    }
+    // Include recent conversation history for context
+    const recentHistory = conversationHistory.slice(-6); // Last 3 turns
+    const historyText =
+      recentHistory.length > 0
+        ? '\n\nRecent conversation:\n' +
+          recentHistory.map((msg) => `${msg.role}: ${msg.content}`).join('\n')
+        : '';
 
-    return `User message: "${message}"${contextInfo}${hint}
+    return `User's current message: "${message}"${contextInfo}${historyText}
 
-Extract any new fields from this message.`;
+Extract any new fields from the user's message. Use the conversation history to understand what question they're answering.
+
+Don't extract fields we already have. Focus on what's new in this message.`;
   }
 
   /**
@@ -242,8 +234,8 @@ Extract any new fields from this message.`;
       // nomination_subject
       if (result.nomination_subject) {
         const valid = ['individual', 'team', 'organization', 'product'];
-        if (valid.includes(result.nomination_subject.toLowerCase())) {
-          cleaned.nomination_subject = result.nomination_subject.toLowerCase();
+        if (valid.includes(String(result.nomination_subject).toLowerCase())) {
+          cleaned.nomination_subject = String(result.nomination_subject).toLowerCase();
         }
       }
 
@@ -258,7 +250,7 @@ Extract any new fields from this message.`;
       // org_type
       if (result.org_type) {
         const valid = ['for_profit', 'non_profit', 'government', 'startup'];
-        const normalized = result.org_type.toLowerCase().replace(/[^a-z_]/g, '_');
+        const normalized = String(result.org_type).toLowerCase().replace(/[^a-z_]/g, '_');
         if (valid.includes(normalized)) {
           cleaned.org_type = normalized;
         }
@@ -267,8 +259,8 @@ Extract any new fields from this message.`;
       // org_size
       if (result.org_size) {
         const valid = ['small', 'medium', 'large'];
-        if (valid.includes(result.org_size.toLowerCase())) {
-          cleaned.org_size = result.org_size.toLowerCase();
+        if (valid.includes(String(result.org_size).toLowerCase())) {
+          cleaned.org_size = String(result.org_size).toLowerCase();
         }
       }
 

@@ -8,7 +8,14 @@ const OPENAI_TIMEOUT_MS = 30000; // 30s (industry practice: timeout all outbound
 const RETRY_MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 1000;
 
+function isAbortError(error: any): boolean {
+  const name = error?.name ?? error?.cause?.name;
+  const code = error?.code ?? error?.cause?.code;
+  return name === 'AbortError' || code === 'ABORT_ERR';
+}
+
 function isRetryableError(error: any): boolean {
+  if (isAbortError(error)) return false;
   const status = error?.status ?? error?.response?.status;
   if (status === 429) return true; // rate limit
   if (status >= 500 && status < 600) return true; // server error
@@ -24,7 +31,12 @@ async function retryWithBackoff<T>(fn: () => Promise<T>): Promise<T> {
       lastError = error;
       if (!isRetryableError(error) || attempt === RETRY_MAX_ATTEMPTS) throw error;
       const delay = RETRY_BASE_MS * Math.pow(2, attempt - 1);
-      logger.warn('openai_retry', { attempt, max: RETRY_MAX_ATTEMPTS, delayMs: delay, error: error.message });
+      logger.warn('openai_retry', {
+        attempt,
+        max: RETRY_MAX_ATTEMPTS,
+        delayMs: delay,
+        error: error.message,
+      });
       await new Promise((r) => setTimeout(r, delay));
     }
   }
@@ -68,23 +80,22 @@ export class OpenAIService {
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    signal?: AbortSignal;
   }): Promise<string> {
-    const {
-      messages,
-      model = 'gpt-4o-mini',
-      temperature = 0.7,
-      maxTokens = 1000,
-    } = params;
+    const { messages, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 1000, signal } = params;
 
     try {
       const r = await openaiCircuitBreaker.fire(() =>
         retryWithBackoff(() =>
-          this.client.chat.completions.create({
-            model,
-            messages,
-            temperature,
-            max_tokens: maxTokens,
-          })
+          this.client.chat.completions.create(
+            {
+              model,
+              messages,
+              temperature,
+              max_tokens: maxTokens,
+            },
+            signal ? { signal } : undefined
+          )
         )
       );
       if (r?.usage) {
@@ -93,6 +104,7 @@ export class OpenAIService {
       }
       return r.choices[0]?.message?.content || '';
     } catch (error: any) {
+      if (isAbortError(error)) throw error;
       logger.error('openai_chat_completion_error', { error: error.message, model });
       throw error;
     }
@@ -106,29 +118,29 @@ export class OpenAIService {
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    signal?: AbortSignal;
   }): AsyncGenerator<string, void, unknown> {
-    const {
-      messages,
-      model = 'gpt-4o-mini',
-      temperature = 0.7,
-      maxTokens = 1000,
-    } = params;
+    const { messages, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 1000, signal } = params;
 
     let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
     try {
       stream = await openaiCircuitBreaker.fire(() =>
         retryWithBackoff(() =>
-          this.client.chat.completions.create({
-            model,
-            messages,
-            temperature,
-            max_tokens: maxTokens,
-            stream: true,
-            stream_options: { include_usage: true },
-          })
+          this.client.chat.completions.create(
+            {
+              model,
+              messages,
+              temperature,
+              max_tokens: maxTokens,
+              stream: true,
+              stream_options: { include_usage: true },
+            },
+            signal ? { signal } : undefined
+          )
         )
       );
     } catch (error: any) {
+      if (isAbortError(error)) throw error;
       logger.error('openai_stream_error', { error: error.message, model });
       throw error;
     }
@@ -148,31 +160,38 @@ export class OpenAIService {
   /**
    * Generate embedding for text. Uses retry + circuit breaker + Redis cache.
    */
-  async generateEmbedding(text: string, model = 'text-embedding-ada-002'): Promise<number[]> {
-    // Check cache first
+  async generateEmbedding(
+    text: string,
+    model = 'text-embedding-ada-002',
+    opts?: { signal?: AbortSignal }
+  ): Promise<number[]> {
     const cached = await cacheManager.getEmbedding(text, model);
     if (cached) {
       logger.debug('embedding_cache_hit', { text_length: text.length, model });
       return cached;
     }
 
-    // Cache miss - call OpenAI
     try {
       const r = await openaiCircuitBreaker.fire(() =>
-        retryWithBackoff(() => this.client.embeddings.create({ model, input: text }))
+        retryWithBackoff(() =>
+          this.client.embeddings.create(
+            { model, input: text },
+            opts?.signal ? { signal: opts.signal } : undefined
+          )
+        )
       );
       const total = r?.usage?.total_tokens ?? 0;
       if (total > 0) openaiTokensTotal.inc({ type: 'prompt' }, total);
-      
+
       const embedding = r.data[0].embedding;
-      
-      // Store in cache (fire and forget - don't block on cache write)
+
       cacheManager.setEmbedding(text, model, embedding).catch((err) => {
         logger.warn('embedding_cache_write_failed', { error: err.message });
       });
-      
+
       return embedding;
     } catch (error: any) {
+      if (isAbortError(error)) throw error;
       logger.error('openai_embedding_error', { error: error.message, text_length: text.length });
       throw error;
     }
@@ -183,20 +202,19 @@ export class OpenAIService {
    */
   async generateEmbeddings(
     texts: string[],
-    model = 'text-embedding-ada-002'
+    model = 'text-embedding-ada-002',
+    opts?: { signal?: AbortSignal }
   ): Promise<number[][]> {
     const batchSize = 100;
     const embeddings: number[][] = [];
 
     for (let i = 0; i < texts.length; i += batchSize) {
       const batch = texts.slice(i, i + batchSize);
-      
-      // Check cache for each text in batch
+
       const cachedResults: (number[] | null)[] = await Promise.all(
-        batch.map(text => cacheManager.getEmbedding(text, model))
+        batch.map((text) => cacheManager.getEmbedding(text, model))
       );
-      
-      // Separate cached vs uncached
+
       const uncachedIndices: number[] = [];
       const uncachedTexts: string[] = [];
       cachedResults.forEach((cached, idx) => {
@@ -205,35 +223,39 @@ export class OpenAIService {
         } else {
           uncachedIndices.push(embeddings.length);
           uncachedTexts.push(batch[idx]);
-          embeddings.push([]); // placeholder
+          embeddings.push([]);
         }
       });
-      
+
       if (uncachedTexts.length > 0) {
-        logger.debug('embedding_batch_cache_miss', { 
-          total: batch.length, 
+        logger.debug('embedding_batch_cache_miss', {
+          total: batch.length,
           cached: batch.length - uncachedTexts.length,
-          uncached: uncachedTexts.length 
+          uncached: uncachedTexts.length,
         });
-        
+
         try {
           const r = await openaiCircuitBreaker.fire(() =>
-            retryWithBackoff(() => this.client.embeddings.create({ model, input: uncachedTexts }))
+            retryWithBackoff(() =>
+              this.client.embeddings.create(
+                { model, input: uncachedTexts },
+                opts?.signal ? { signal: opts.signal } : undefined
+              )
+            )
           );
           const total = r?.usage?.total_tokens ?? 0;
           if (total > 0) openaiTokensTotal.inc({ type: 'prompt' }, total);
-          
-          // Fill in placeholders with fresh embeddings
+
           r.data.forEach((d: { embedding: number[] }, idx: number) => {
             const embeddingIdx = uncachedIndices[idx];
             embeddings[embeddingIdx] = d.embedding;
-            
-            // Cache each embedding (fire and forget)
+
             cacheManager.setEmbedding(uncachedTexts[idx], model, d.embedding).catch((err) => {
               logger.warn('embedding_batch_cache_write_failed', { error: err.message });
             });
           });
         } catch (error: any) {
+          if (isAbortError(error)) throw error;
           logger.error('openai_batch_embedding_error', { error: error.message, count: texts.length });
           throw error;
         }
@@ -246,5 +268,4 @@ export class OpenAIService {
   }
 }
 
-// Export singleton instance
 export const openaiService = new OpenAIService();
