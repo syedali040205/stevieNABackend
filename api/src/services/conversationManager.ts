@@ -1,7 +1,14 @@
 import { openaiService } from './openaiService';
 import logger from '../utils/logger';
-import { getFirstMissingStep } from './demographicQuestions';
 
+/**
+ * Conversation Manager Service
+ *
+ * Streams responses.
+ *
+ * NOTE: Recommendation intake is handled by the AI-driven intake assistant inside
+ * unifiedChatbotService. This manager focuses on QA-style responses grounded on KB.
+ */
 export class ConversationManager {
   async *generateResponseStream(params: {
     message: string;
@@ -20,23 +27,7 @@ export class ConversationManager {
       has_kb_articles: kbArticles !== null && kbArticles !== undefined && kbArticles.length > 0,
     });
 
-    // Deterministic questionnaire for recommendation mode.
-    if (contextType === 'recommendation') {
-      const next = getFirstMissingStep(userContext);
-      if (next) {
-        // Keep it short; avoid LLM drift.
-        const alreadyChatted = (conversationHistory?.length ?? 0) > 0;
-        const ack = alreadyChatted ? 'Got it. ' : '';
-        yield `${ack}${next.question}`;
-        return;
-      }
-
-      // All required intake complete. The service will generate recommendations.
-      yield "Perfect — I’ve got everything I need. Give me a moment to pull the best matching categories.";
-      return;
-    }
-
-    // QA mode remains LLM-driven but grounded on KB context.
+    // Only QA responses are streamed here.
     try {
       const systemPrompt = this.buildSystemPrompt();
       const userPrompt = this.buildUserPrompt({ message, conversationHistory, userContext, kbArticles });

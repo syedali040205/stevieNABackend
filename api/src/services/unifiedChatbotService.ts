@@ -9,12 +9,7 @@ import { openaiService } from './openaiService';
 import { contextClassifier } from './contextClassifier';
 import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
-import {
-  getFirstMissingStep,
-  hasRequiredDemographics,
-  normalizeSkippableAnswer,
-  type DemographicStepId,
-} from './demographicQuestions';
+import { intakeAssistant } from './intakeAssistant';
 import crypto from 'crypto';
 
 export class UnifiedChatbotService {
@@ -54,25 +49,6 @@ export class UnifiedChatbotService {
     }
   }
 
-  private applySkipForFollowups(userContext: any, message: string, conversationHistory: any[]): any {
-    if (!conversationHistory || conversationHistory.length === 0) return userContext;
-
-    const lastAssistant = [...conversationHistory].reverse().find((m) => m.role === 'assistant');
-    if (!lastAssistant) return userContext;
-
-    const { skipped, value } = normalizeSkippableAnswer(message);
-    if (!skipped) return userContext;
-
-    const q = lastAssistant.content.toLowerCase();
-
-    const updated = { ...userContext };
-    if (q.includes('measurable impact') && !updated.achievement_impact) updated.achievement_impact = value;
-    if (q.includes('innovative or unique') && !updated.achievement_innovation) updated.achievement_innovation = value;
-    if (q.includes('challenges you overcame') && !updated.achievement_challenges) updated.achievement_challenges = value;
-
-    return updated;
-  }
-
   private mapCountryToGeography(country: string): string | null {
     if (!country) return null;
     const countryLower = country.toLowerCase().trim();
@@ -81,67 +57,42 @@ export class UnifiedChatbotService {
     return 'worldwide';
   }
 
-  private async persistChatMessages(params: {
+  private persistChatMessagesFireAndForget(params: {
     sessionId: string;
     userMessage: string;
     assistantMessage: string;
-  }): Promise<void> {
+  }): void {
     const { sessionId, userMessage, assistantMessage } = params;
 
-    try {
-      const rows = [
-        { session_id: sessionId, role: 'user', content: userMessage, sources: [] },
-        { session_id: sessionId, role: 'assistant', content: assistantMessage, sources: [] },
-      ];
+    void (async () => {
+      try {
+        const { error } = await this.supabase.from('chatbot_messages').insert([
+          { session_id: sessionId, role: 'user', content: userMessage, sources: [] },
+          { session_id: sessionId, role: 'assistant', content: assistantMessage, sources: [] },
+        ]);
 
-      const { error } = await this.supabase.from('chatbot_messages').insert(rows);
-      if (error) {
-        logger.warn('chatbot_messages_insert_failed', { session_id: sessionId, error: error.message });
+        if (error) logger.warn('chatbot_messages_insert_failed', { session_id: sessionId, error: error.message });
+      } catch (e: any) {
+        logger.warn('chatbot_messages_insert_unexpected_error', { session_id: sessionId, error: e.message });
       }
-    } catch (e: any) {
-      logger.warn('chatbot_messages_insert_unexpected_error', { session_id: sessionId, error: e.message });
-    }
+    })();
   }
 
-  private applyManualEnrichmentForStep(params: {
-    userContext: any;
-    message: string;
-    stepId: DemographicStepId;
-  }): any {
-    const { userContext, message, stepId } = params;
-    const next = { ...userContext };
-    const trimmed = (message ?? '').trim();
-
-    // Never parse sizes out of an email-like input.
-    const looksLikeEmail = trimmed.includes('@');
-
-    const firstNumber = (): number | null => {
-      const m = trimmed.match(/(\d{1,6})/);
-      if (!m) return null;
-      const n = parseInt(m[1], 10);
-      if (!Number.isFinite(n)) return null;
-      return n;
-    };
-
-    if (stepId === 'team_size' && !looksLikeEmail) {
-      const n = firstNumber();
-      if (n !== null && n >= 1 && n <= 1_000_000) next.team_size = n;
-    }
-
-    if (stepId === 'company_size' && !looksLikeEmail) {
-      const n = firstNumber();
-      if (n !== null && n >= 1 && n <= 10_000_000) next.company_size = n;
-    }
-
-    if (stepId === 'nomination_subject') {
-      const lower = trimmed.toLowerCase();
-      if (['team', 'a team', 'our team', 'my team'].some((x) => lower === x)) next.nomination_subject = 'team';
-      if (['product', 'a product', 'our product', 'my product'].some((x) => lower === x)) next.nomination_subject = 'product';
-      if (['organization', 'company', 'an organization', 'a company'].some((x) => lower === x)) next.nomination_subject = 'organization';
-      if (['myself', 'me', 'individual', 'self'].some((x) => lower === x)) next.nomination_subject = 'individual';
-    }
-
-    return next;
+  /**
+   * AI-driven readiness check lives in prompt, but we still need a final guard to avoid calling
+   * recommendation engine with obviously missing required data.
+   */
+  private hasMinimumForRecommendations(ctx: any): boolean {
+    return !!(
+      ctx.user_name &&
+      ctx.user_email &&
+      ctx.nomination_subject &&
+      ctx.geography &&
+      ctx.description &&
+      ctx.achievement_impact &&
+      ctx.achievement_innovation &&
+      ctx.achievement_challenges
+    );
   }
 
   async *chat(params: { sessionId: string; message: string; userId?: string; signal?: AbortSignal }): AsyncGenerator<any, void, unknown> {
@@ -191,55 +142,85 @@ export class UnifiedChatbotService {
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
 
-      // Determine next step BEFORE extraction so extraction/enrichment is step-aware.
-      const nextStep = getFirstMissingStep(userContext);
-      const onlyField: DemographicStepId | undefined = nextStep?.id;
-
-      logger.info('step_1_parallel_processing');
-      const [context, extractedFields] = await Promise.all([
-        contextClassifier.classifyContext({ message, conversationHistory, currentContext: undefined, userContext, signal }),
-        fieldExtractor.extractFields({
-          message,
-          userContext,
-          conversationHistory,
-          signal,
-          onlyField,
-        }),
-      ]);
+      logger.info('step_1_classifying_context');
+      const context = await contextClassifier.classifyContext({
+        message,
+        conversationHistory,
+        currentContext: undefined,
+        userContext,
+        signal,
+      });
 
       yield { type: 'intent', intent: context.context, confidence: context.confidence };
 
-      let kbArticles: any[] | null = null;
-      if (context.context === 'qa') kbArticles = await this.searchKB(message, signal);
+      if (context.context === 'qa') {
+        const extractedFields = await fieldExtractor.extractFields({ message, userContext, conversationHistory, signal });
+        if (extractedFields && Object.keys(extractedFields).length > 0) userContext = { ...userContext, ...extractedFields };
 
-      // Apply extracted ONLY field
-      if (extractedFields && Object.keys(extractedFields).length > 0) {
-        userContext = { ...userContext, ...extractedFields };
+        const kbArticles = await this.searchKB(message, signal);
+
+        let assistantResponse = '';
+        for await (const chunk of conversationManager.generateResponseStream({
+          message,
+          context,
+          conversationHistory,
+          userContext,
+          kbArticles,
+          signal,
+        })) {
+          assistantResponse += chunk;
+          yield { type: 'chunk', content: chunk };
+        }
+
+        const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
+          ...conversationHistory,
+          { role: 'user' as const, content: message },
+          { role: 'assistant' as const, content: assistantResponse || '(No response)' },
+        ];
+        const updatedHistory =
+          fullHistory.length > this.MAX_CONVERSATION_HISTORY ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY) : fullHistory;
+
+        await this.sessionManager.updateSession(
+          sessionId,
+          { user_context: userContext, conversation_history: updatedHistory },
+          session.conversation_state as any
+        );
+
+        this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: assistantResponse || '(No response)' });
+        logger.info('unified_chat_complete');
+        return;
       }
 
-      // Apply skip markers (followups)
-      userContext = this.applySkipForFollowups(userContext, message, conversationHistory);
+      // Recommendation mode: purely AI-driven intake (required fields live in prompt).
+      const intake = await intakeAssistant.run({ message, userContext, conversationHistory, signal });
 
-      // Apply manual enrichment only for the next required step
-      if (context.context === 'recommendation' && nextStep?.id) {
-        userContext = this.applyManualEnrichmentForStep({ userContext, message, stepId: nextStep.id });
+      const updates = intake.updates || {};
+      const updateKeys = Object.keys(updates);
+      if (updateKeys.length > 0) {
+        userContext = { ...userContext, ...updates };
       }
 
-      let assistantResponse = '';
-      for await (const chunk of conversationManager.generateResponseStream({
-        message,
-        context,
-        conversationHistory,
-        userContext,
-        kbArticles,
-        signal,
-      })) {
-        assistantResponse += chunk;
-        yield { type: 'chunk', content: chunk };
-      }
+      const assistantText = (intake.next_question || '').trim() || 'Okay.';
+      yield { type: 'chunk', content: assistantText };
 
-      const ready = context.context === 'recommendation' && hasRequiredDemographics(userContext);
-      if (ready) {
+      const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
+        ...conversationHistory,
+        { role: 'user' as const, content: message },
+        { role: 'assistant' as const, content: assistantText },
+      ];
+      const updatedHistory =
+        fullHistory.length > this.MAX_CONVERSATION_HISTORY ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY) : fullHistory;
+
+      await this.sessionManager.updateSession(
+        sessionId,
+        { user_context: userContext, conversation_history: updatedHistory },
+        session.conversation_state as any
+      );
+
+      this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: assistantText });
+
+      // If AI says ready, we still guard on minimum fields.
+      if (intake.ready_for_recommendations && this.hasMinimumForRecommendations(userContext)) {
         yield { type: 'status', message: 'Generating personalized category recommendations...' };
 
         const contextForRecommendations = {
@@ -257,27 +238,7 @@ export class UnifiedChatbotService {
         yield { type: 'recommendations', data: recommendations, count: recommendations.length };
       }
 
-      const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
-        ...conversationHistory,
-        { role: 'user' as const, content: message },
-        { role: 'assistant' as const, content: assistantResponse || '(No response)' },
-      ];
-      const updatedHistory =
-        fullHistory.length > this.MAX_CONVERSATION_HISTORY ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY) : fullHistory;
-
-      await this.sessionManager.updateSession(
-        sessionId,
-        { user_context: userContext, conversation_history: updatedHistory },
-        session.conversation_state as any
-      );
-
-      await this.persistChatMessages({
-        sessionId,
-        userMessage: message,
-        assistantMessage: assistantResponse || '(No response)',
-      });
-
-      logger.info('unified_chat_complete');
+      logger.info('unified_chat_complete', { update_keys: updateKeys, ai_ready: intake.ready_for_recommendations });
     } catch (error: any) {
       if (error?.code === 'OnboardingRequired') throw error;
       if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
