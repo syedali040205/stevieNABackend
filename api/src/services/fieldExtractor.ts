@@ -1,18 +1,16 @@
 import { openaiService } from './openaiService';
 import logger from '../utils/logger';
+import type { DemographicStepId } from './demographicQuestions';
 
 /**
  * Field Extractor Service
  *
  * Extracts structured fields from user messages using OpenAI.
+ *
+ * Supports a strict mode (`onlyField`) used by the deterministic recommendation intake.
  */
 
-const SYSTEM_PROMPT = `You are a field extraction assistant for a Stevie Awards nomination chatbot.
-
-Extract any NEW fields from the user's message based on the conversation.
-Return ONLY valid JSON. Omit fields you didn't find. If none found, return {}.
-
-Fields:
+const BASE_FIELDS = `Fields:
 - user_name: string
 - user_email: string (valid)
 - geography: string
@@ -24,23 +22,61 @@ Fields:
 - achievement_innovation: string (may be "__skipped__")
 - achievement_challenges: string (may be "__skipped__")`;
 
+function buildSystemPrompt(onlyField?: DemographicStepId): string {
+  if (!onlyField) {
+    return `You are a field extraction assistant for a Stevie Awards nomination chatbot.
+
+Extract any NEW fields from the user's message based on the conversation.
+Return ONLY valid JSON. Omit fields you didn't find. If none found, return {}.
+
+${BASE_FIELDS}`;
+  }
+
+  return `You are a STRICT field extraction assistant for a Stevie Awards nomination chatbot.
+
+You MUST extract ONLY ONE field: "${onlyField}".
+
+Rules:
+- Return ONLY valid JSON.
+- If the user message does not contain a confident answer for "${onlyField}", return {}.
+- Do NOT extract any other fields.
+- Do NOT guess.
+
+Field types:
+- user_name: string
+- user_email: string
+- nomination_subject: one of individual|team|organization|product
+- geography: string
+- team_size: number
+- company_size: number
+- achievement_description: string (map to key "description")
+- achievement_impact: string
+- achievement_innovation: string
+- achievement_challenges: string
+
+NOTE: When onlyField is "achievement_description", use JSON key "description".
+When onlyField is one of the follow-ups, use that exact key.
+`;
+}
+
 export class FieldExtractor {
   async extractFields(params: {
     message: string;
     userContext: any;
     conversationHistory?: Array<{ role: string; content: string }>;
     signal?: AbortSignal;
+    onlyField?: DemographicStepId;
   }): Promise<Record<string, any>> {
-    const { message, userContext, conversationHistory = [], signal } = params;
+    const { message, userContext, conversationHistory = [], signal, onlyField } = params;
 
-    logger.info('extracting_fields', { message_length: message.length });
+    logger.info('extracting_fields', { message_length: message.length, only_field: onlyField ?? null });
 
     try {
-      const userPrompt = this.buildUserPrompt(message, userContext, conversationHistory);
+      const userPrompt = this.buildUserPrompt(message, userContext, conversationHistory, onlyField);
 
       const response = await openaiService.chatCompletion({
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: buildSystemPrompt(onlyField) },
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.0,
@@ -63,10 +99,15 @@ export class FieldExtractor {
     }
   }
 
-  private buildUserPrompt(message: string, userContext: any, conversationHistory: Array<{ role: string; content: string }>): string {
+  private buildUserPrompt(
+    message: string,
+    userContext: any,
+    conversationHistory: Array<{ role: string; content: string }>,
+    onlyField?: DemographicStepId
+  ): string {
     const contextParts: string[] = [];
 
-    for (const k of [
+    const keys = [
       'user_name',
       'user_email',
       'geography',
@@ -77,7 +118,9 @@ export class FieldExtractor {
       'achievement_impact',
       'achievement_innovation',
       'achievement_challenges',
-    ]) {
+    ];
+
+    for (const k of keys) {
       if (userContext[k] !== undefined && userContext[k] !== null && userContext[k] !== '') {
         contextParts.push(`Already know ${k}: ${String(userContext[k]).substring(0, 140)}`);
       }
@@ -90,6 +133,14 @@ export class FieldExtractor {
       recentHistory.length > 0
         ? '\n\nRecent conversation:\n' + recentHistory.map((msg) => `${msg.role}: ${msg.content}`).join('\n')
         : '';
+
+    if (onlyField) {
+      return `We are collecting "${onlyField}".
+
+User message: "${message}"${contextInfo}${historyText}
+
+Return JSON for ONLY that field if present, else {}.`;
+    }
 
     return `User message: "${message}"${contextInfo}${historyText}\n\nExtract any NEW fields from the user message. Pay attention to what the assistant asked most recently.`;
   }

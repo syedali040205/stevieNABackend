@@ -9,7 +9,12 @@ import { openaiService } from './openaiService';
 import { contextClassifier } from './contextClassifier';
 import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
-import { hasRequiredDemographics, normalizeSkippableAnswer } from './demographicQuestions';
+import {
+  getFirstMissingStep,
+  hasRequiredDemographics,
+  normalizeSkippableAnswer,
+  type DemographicStepId,
+} from './demographicQuestions';
 import crypto from 'crypto';
 
 export class UnifiedChatbotService {
@@ -49,97 +54,6 @@ export class UnifiedChatbotService {
     }
   }
 
-  private enrichContextFromConversation(context: any, currentMessage: string, conversationHistory: any[]): any {
-    const enrichedContext = { ...context };
-    const messageLower = currentMessage.toLowerCase();
-
-    const setNomination = (value: 'individual' | 'team' | 'organization' | 'product') => {
-      if (!enrichedContext.nomination_subject) {
-        enrichedContext.nomination_subject = value;
-        logger.info('enriched_nomination_subject', { value, source: 'keyword' });
-      }
-    };
-
-    if (messageLower === 'team' || messageLower.includes(' our team') || messageLower.includes('my team')) {
-      setNomination('team');
-    } else if (messageLower === 'product' || messageLower.includes(' our product')) {
-      setNomination('product');
-    } else if (messageLower.includes('nominate myself') || messageLower === 'individual') {
-      setNomination('individual');
-    } else if (messageLower.includes('organization')) {
-      setNomination('organization');
-    }
-
-    if (!enrichedContext.geography) {
-      const commonCountries = [
-        'india',
-        'pakistan',
-        'usa',
-        'united states',
-        'uk',
-        'united kingdom',
-        'canada',
-        'australia',
-        'germany',
-        'france',
-        'uae',
-        'dubai',
-        'china',
-        'japan',
-        'singapore',
-      ];
-      for (const country of commonCountries) {
-        if (
-          messageLower === country ||
-          messageLower.includes(`from ${country}`) ||
-          messageLower.includes(`in ${country}`) ||
-          messageLower.includes(`based in ${country}`)
-        ) {
-          enrichedContext.geography = country.charAt(0).toUpperCase() + country.slice(1);
-          logger.info('enriched_geography', { value: enrichedContext.geography, source: 'keyword' });
-          break;
-        }
-      }
-    }
-
-    const sizeNumber = (txt: string): number | null => {
-      const m = txt.trim().match(/(\d{1,6})/);
-      if (!m) return null;
-      const n = parseInt(m[1], 10);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    if (!enrichedContext.team_size) {
-      const n = sizeNumber(currentMessage);
-      if (n !== null && currentMessage.trim().length <= 40) {
-        enrichedContext.team_size = n;
-        logger.info('enriched_team_size', { value: n, source: 'pattern_match' });
-      }
-    } else if (!enrichedContext.company_size) {
-      const n = sizeNumber(currentMessage);
-      if (n !== null && currentMessage.trim().length <= 40) {
-        enrichedContext.company_size = n;
-        logger.info('enriched_company_size', { value: n, source: 'pattern_match' });
-      }
-    }
-
-    const hasAskedForDescription = conversationHistory.some(
-      (msg) => msg.role === 'assistant' && msg.content.toLowerCase().includes('tell me about the achievement')
-    );
-    if (hasAskedForDescription && (!enrichedContext.description || enrichedContext.description.length < 50)) {
-      const userMessages = conversationHistory
-        .filter((m) => m.role === 'user')
-        .map((m) => m.content)
-        .join(' ');
-      const fullDescription = `${userMessages} ${currentMessage}`.trim();
-      if (fullDescription.length > 50) {
-        enrichedContext.description = fullDescription.substring(0, 800);
-      }
-    }
-
-    return enrichedContext;
-  }
-
   private applySkipForFollowups(userContext: any, message: string, conversationHistory: any[]): any {
     if (!conversationHistory || conversationHistory.length === 0) return userContext;
 
@@ -174,7 +88,6 @@ export class UnifiedChatbotService {
   }): Promise<void> {
     const { sessionId, userMessage, assistantMessage } = params;
 
-    // Best-effort persistence: do not fail the request if DB insert fails.
     try {
       const rows = [
         { session_id: sessionId, role: 'user', content: userMessage, sources: [] },
@@ -188,6 +101,47 @@ export class UnifiedChatbotService {
     } catch (e: any) {
       logger.warn('chatbot_messages_insert_unexpected_error', { session_id: sessionId, error: e.message });
     }
+  }
+
+  private applyManualEnrichmentForStep(params: {
+    userContext: any;
+    message: string;
+    stepId: DemographicStepId;
+  }): any {
+    const { userContext, message, stepId } = params;
+    const next = { ...userContext };
+    const trimmed = (message ?? '').trim();
+
+    // Never parse sizes out of an email-like input.
+    const looksLikeEmail = trimmed.includes('@');
+
+    const firstNumber = (): number | null => {
+      const m = trimmed.match(/(\d{1,6})/);
+      if (!m) return null;
+      const n = parseInt(m[1], 10);
+      if (!Number.isFinite(n)) return null;
+      return n;
+    };
+
+    if (stepId === 'team_size' && !looksLikeEmail) {
+      const n = firstNumber();
+      if (n !== null && n >= 1 && n <= 1_000_000) next.team_size = n;
+    }
+
+    if (stepId === 'company_size' && !looksLikeEmail) {
+      const n = firstNumber();
+      if (n !== null && n >= 1 && n <= 10_000_000) next.company_size = n;
+    }
+
+    if (stepId === 'nomination_subject') {
+      const lower = trimmed.toLowerCase();
+      if (['team', 'a team', 'our team', 'my team'].some((x) => lower === x)) next.nomination_subject = 'team';
+      if (['product', 'a product', 'our product', 'my product'].some((x) => lower === x)) next.nomination_subject = 'product';
+      if (['organization', 'company', 'an organization', 'a company'].some((x) => lower === x)) next.nomination_subject = 'organization';
+      if (['myself', 'me', 'individual', 'self'].some((x) => lower === x)) next.nomination_subject = 'individual';
+    }
+
+    return next;
   }
 
   async *chat(params: { sessionId: string; message: string; userId?: string; signal?: AbortSignal }): AsyncGenerator<any, void, unknown> {
@@ -237,10 +191,20 @@ export class UnifiedChatbotService {
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
 
+      // Determine next step BEFORE extraction so extraction/enrichment is step-aware.
+      const nextStep = getFirstMissingStep(userContext);
+      const onlyField: DemographicStepId | undefined = nextStep?.id;
+
       logger.info('step_1_parallel_processing');
       const [context, extractedFields] = await Promise.all([
         contextClassifier.classifyContext({ message, conversationHistory, currentContext: undefined, userContext, signal }),
-        fieldExtractor.extractFields({ message, userContext, conversationHistory, signal }),
+        fieldExtractor.extractFields({
+          message,
+          userContext,
+          conversationHistory,
+          signal,
+          onlyField,
+        }),
       ]);
 
       yield { type: 'intent', intent: context.context, confidence: context.confidence };
@@ -248,12 +212,18 @@ export class UnifiedChatbotService {
       let kbArticles: any[] | null = null;
       if (context.context === 'qa') kbArticles = await this.searchKB(message, signal);
 
+      // Apply extracted ONLY field
       if (extractedFields && Object.keys(extractedFields).length > 0) {
         userContext = { ...userContext, ...extractedFields };
       }
 
+      // Apply skip markers (followups)
       userContext = this.applySkipForFollowups(userContext, message, conversationHistory);
-      userContext = this.enrichContextFromConversation(userContext, message, conversationHistory);
+
+      // Apply manual enrichment only for the next required step
+      if (context.context === 'recommendation' && nextStep?.id) {
+        userContext = this.applyManualEnrichmentForStep({ userContext, message, stepId: nextStep.id });
+      }
 
       let assistantResponse = '';
       for await (const chunk of conversationManager.generateResponseStream({
@@ -301,7 +271,6 @@ export class UnifiedChatbotService {
         session.conversation_state as any
       );
 
-      // Persist messages to relational table (final assistant message only, not per-chunk)
       await this.persistChatMessages({
         sessionId,
         userMessage: message,
