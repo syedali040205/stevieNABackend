@@ -30,11 +30,29 @@ export class UnifiedChatbotService {
     return `${this.KB_CACHE_PREFIX}${hash}`;
   }
 
+  private async requireProfileIfAuthenticated(userId: string): Promise<void> {
+    const profile = await userProfileManager.getProfile(userId);
+    if (!profile) {
+      const err: any = new Error('OnboardingRequired');
+      err.code = 'OnboardingRequired';
+      err.httpStatus = 409;
+      err.details = { missing: 'profile_row' };
+      throw err;
+    }
+
+    if (!profile.full_name || !profile.country || !profile.organization_name || !profile.email) {
+      const err: any = new Error('OnboardingRequired');
+      err.code = 'OnboardingRequired';
+      err.httpStatus = 409;
+      err.details = { missing: 'required_profile_fields' };
+      throw err;
+    }
+  }
+
   private enrichContextFromConversation(context: any, currentMessage: string, conversationHistory: any[]): any {
     const enrichedContext = { ...context };
     const messageLower = currentMessage.toLowerCase();
 
-    // nomination_subject
     const setNomination = (value: 'individual' | 'team' | 'organization' | 'product') => {
       if (!enrichedContext.nomination_subject) {
         enrichedContext.nomination_subject = value;
@@ -52,7 +70,6 @@ export class UnifiedChatbotService {
       setNomination('organization');
     }
 
-    // geography
     if (!enrichedContext.geography) {
       const commonCountries = [
         'india',
@@ -92,7 +109,6 @@ export class UnifiedChatbotService {
       return Number.isFinite(n) ? n : null;
     };
 
-    // team_size + company_size
     if (!enrichedContext.team_size) {
       const n = sizeNumber(currentMessage);
       if (n !== null && currentMessage.trim().length <= 40) {
@@ -107,7 +123,6 @@ export class UnifiedChatbotService {
       }
     }
 
-    // description
     const hasAskedForDescription = conversationHistory.some(
       (msg) => msg.role === 'assistant' && msg.content.toLowerCase().includes('tell me about the achievement')
     );
@@ -125,10 +140,6 @@ export class UnifiedChatbotService {
     return enrichedContext;
   }
 
-  /**
-   * If the last assistant message was a follow-up question and the user says skip/n/a/etc,
-   * persist __skipped__ so the deterministic flow can move on.
-   */
   private applySkipForFollowups(userContext: any, message: string, conversationHistory: any[]): any {
     if (!conversationHistory || conversationHistory.length === 0) return userContext;
 
@@ -156,6 +167,29 @@ export class UnifiedChatbotService {
     return 'worldwide';
   }
 
+  private async persistChatMessages(params: {
+    sessionId: string;
+    userMessage: string;
+    assistantMessage: string;
+  }): Promise<void> {
+    const { sessionId, userMessage, assistantMessage } = params;
+
+    // Best-effort persistence: do not fail the request if DB insert fails.
+    try {
+      const rows = [
+        { session_id: sessionId, role: 'user', content: userMessage, sources: [] },
+        { session_id: sessionId, role: 'assistant', content: assistantMessage, sources: [] },
+      ];
+
+      const { error } = await this.supabase.from('chatbot_messages').insert(rows);
+      if (error) {
+        logger.warn('chatbot_messages_insert_failed', { session_id: sessionId, error: error.message });
+      }
+    } catch (e: any) {
+      logger.warn('chatbot_messages_insert_unexpected_error', { session_id: sessionId, error: e.message });
+    }
+  }
+
   async *chat(params: { sessionId: string; message: string; userId?: string; signal?: AbortSignal }): AsyncGenerator<any, void, unknown> {
     const { sessionId, message, userId, signal } = params;
 
@@ -170,17 +204,14 @@ export class UnifiedChatbotService {
 
         let initialContext: any = { geography: null, organization_name: null, job_title: null };
         if (userId) {
-          try {
-            const profile = await userProfileManager.getProfile(userId);
-            if (profile) {
-              initialContext = {
-                geography: this.mapCountryToGeography(profile.country),
-                organization_name: profile.organization_name,
-                job_title: profile.job_title || null,
-              };
-            }
-          } catch (e: any) {
-            logger.error('failed_to_load_profile', { user_id: userId, error: e.message });
+          await this.requireProfileIfAuthenticated(userId);
+          const profile = await userProfileManager.getProfile(userId);
+          if (profile) {
+            initialContext = {
+              geography: this.mapCountryToGeography(profile.country),
+              organization_name: profile.organization_name,
+              job_title: profile.job_title || null,
+            };
           }
         }
 
@@ -211,10 +242,6 @@ export class UnifiedChatbotService {
         contextClassifier.classifyContext({ message, conversationHistory, currentContext: undefined, userContext, signal }),
         fieldExtractor.extractFields({ message, userContext, conversationHistory, signal }),
       ]);
-
-      if (context.context === 'recommendation') {
-        userContext = { ...userContext };
-      }
 
       yield { type: 'intent', intent: context.context, confidence: context.confidence };
 
@@ -274,8 +301,16 @@ export class UnifiedChatbotService {
         session.conversation_state as any
       );
 
+      // Persist messages to relational table (final assistant message only, not per-chunk)
+      await this.persistChatMessages({
+        sessionId,
+        userMessage: message,
+        assistantMessage: assistantResponse || '(No response)',
+      });
+
       logger.info('unified_chat_complete');
     } catch (error: any) {
+      if (error?.code === 'OnboardingRequired') throw error;
       if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
       logger.error('unified_chat_error', { error: error.message, stack: error.stack });
       throw new Error(`Failed to process chat: ${error.message}`);

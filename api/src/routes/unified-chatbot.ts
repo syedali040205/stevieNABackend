@@ -168,6 +168,22 @@ router.post(
         return;
       }
 
+      // Profile missing/incomplete: tell the client explicitly.
+      if (error?.code === "OnboardingRequired" || error?.message === "OnboardingRequired") {
+        writeSse(
+          res,
+          {
+            type: "onboarding_required",
+            message: "Please complete onboarding before using the chatbot.",
+            code: "OnboardingRequired",
+            details: error?.details ?? undefined,
+          },
+          "onboarding_required",
+        );
+        res.end();
+        return;
+      }
+
       logger.error("unified_chat_error", {
         error: error.message,
         correlation_id: correlationId,
