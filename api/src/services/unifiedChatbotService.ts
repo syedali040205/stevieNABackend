@@ -10,6 +10,7 @@ import { contextClassifier } from './contextClassifier';
 import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
 import { intakeAssistant } from './intakeAssistant';
+import { applyAnswer, type IntakeField } from './intakeFlow';
 import crypto from 'crypto';
 
 export class UnifiedChatbotService {
@@ -78,20 +79,17 @@ export class UnifiedChatbotService {
     })();
   }
 
-  /**
-   * AI-driven readiness check lives in prompt, but we still need a final guard to avoid calling
-   * recommendation engine with obviously missing required data.
-   */
   private hasMinimumForRecommendations(ctx: any): boolean {
+    // Require 7 essential fields for recommendations
+    // Optional fields (geography, impact, innovation, challenges) can enhance results but aren't required
     return !!(
       ctx.user_name &&
       ctx.user_email &&
       ctx.nomination_subject &&
-      ctx.geography &&
-      ctx.description &&
-      ctx.achievement_impact &&
-      ctx.achievement_innovation &&
-      ctx.achievement_challenges
+      ctx.org_type &&
+      ctx.gender_programs_opt_in !== undefined &&
+      ctx.recognition_scope &&
+      ctx.description
     );
   }
 
@@ -125,7 +123,7 @@ export class UnifiedChatbotService {
           .insert({
             id: sessionId,
             user_id: effectiveUserId,
-            session_data: { user_context: initialContext, conversation_history: [] },
+            session_data: { user_context: initialContext, conversation_history: [], pending_field: null },
             conversation_state: 'collecting_org_type',
             expires_at: expiresAt.toISOString(),
           })
@@ -141,6 +139,7 @@ export class UnifiedChatbotService {
 
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
+      let pendingField = (session.session_data as any).pending_field as IntakeField | null | undefined;
 
       logger.info('step_1_classifying_context');
       const context = await contextClassifier.classifyContext({
@@ -182,7 +181,7 @@ export class UnifiedChatbotService {
 
         await this.sessionManager.updateSession(
           sessionId,
-          { user_context: userContext, conversation_history: updatedHistory },
+          { user_context: userContext, conversation_history: updatedHistory, pending_field: pendingField ?? null },
           session.conversation_state as any
         );
 
@@ -191,16 +190,66 @@ export class UnifiedChatbotService {
         return;
       }
 
-      // Recommendation mode: purely AI-driven intake (required fields live in prompt).
-      const intake = await intakeAssistant.run({ message, userContext, conversationHistory, signal });
+      // Recommendation mode:
+      // - Store raw user answer into pendingField (what we asked last)
+      // - In the SAME LLM call, extract any additional fields from the user's message via updates,
+      //   decide next missing field, and ask next question.
 
-      const updates = intake.updates || {};
-      const updateKeys = Object.keys(updates);
-      if (updateKeys.length > 0) {
-        userContext = { ...userContext, ...updates };
+      if (pendingField) {
+        const applied = applyAnswer({ pendingField, message, userContext });
+        if (applied.accepted) userContext = applied.updatedContext;
       }
 
-      const assistantText = (intake.next_question || '').trim() || 'Okay.';
+      const plan = await intakeAssistant.planNext({ userContext, message, signal });
+
+      // Merge extracted updates (LLM) into userContext.
+      if (plan.updates && Object.keys(plan.updates).length > 0) {
+        userContext = { ...userContext, ...plan.updates };
+      }
+
+      // Safeguard: don't let the model jump past basic identity fields if they're still missing.
+      const missingBasics: IntakeField[] = [];
+      if (!userContext.user_name) missingBasics.push('user_name');
+      if (!userContext.user_email) missingBasics.push('user_email');
+      if (!userContext.nomination_subject) missingBasics.push('nomination_subject');
+      if (!userContext.org_type) missingBasics.push('org_type');
+      if (userContext.gender_programs_opt_in === undefined) missingBasics.push('gender_programs_opt_in');
+      if (!userContext.recognition_scope) missingBasics.push('recognition_scope');
+      if (!userContext.description) missingBasics.push('description');
+
+      let assistantText = plan.next_question;
+      let effectiveNextField: IntakeField | null = plan.next_field;
+
+      if (missingBasics.length > 0 && plan.ready_for_recommendations !== true) {
+        const forced = missingBasics[0];
+        if (effectiveNextField !== forced) {
+          effectiveNextField = forced;
+          if (forced === 'user_name') assistantText = "What's your name?";
+          else if (forced === 'user_email') assistantText = 'And your email?';
+          else if (forced === 'nomination_subject') {
+            assistantText = 'Are we nominating an individual, team, organization, or product?';
+          }
+          else if (forced === 'org_type') {
+            assistantText = 'For-profit or non-profit?';
+          }
+          else if (forced === 'gender_programs_opt_in') {
+            assistantText = 'Interested in women-focused awards too? (yes/no/skip)';
+          }
+          else if (forced === 'recognition_scope') {
+            assistantText = 'US awards, global, or both?';
+          }
+          else if (forced === 'description') {
+            assistantText = 'Tell me about the achievement!';
+          }
+
+          logger.info('intake_safeguard_forced_basic_field', {
+            forced_field: forced,
+            model_next_field: plan.next_field,
+            update_keys: Object.keys(plan.updates || {}),
+          });
+        }
+      }
+
       yield { type: 'chunk', content: assistantText };
 
       const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
@@ -211,23 +260,24 @@ export class UnifiedChatbotService {
       const updatedHistory =
         fullHistory.length > this.MAX_CONVERSATION_HISTORY ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY) : fullHistory;
 
+      pendingField = plan.ready_for_recommendations ? null : effectiveNextField;
+
       await this.sessionManager.updateSession(
         sessionId,
-        { user_context: userContext, conversation_history: updatedHistory },
+        { user_context: userContext, conversation_history: updatedHistory, pending_field: pendingField ?? null },
         session.conversation_state as any
       );
 
       this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: assistantText });
 
-      // If AI says ready, we still guard on minimum fields.
-      if (intake.ready_for_recommendations && this.hasMinimumForRecommendations(userContext)) {
+      if (plan.ready_for_recommendations && this.hasMinimumForRecommendations(userContext)) {
         yield { type: 'status', message: 'Generating personalized category recommendations...' };
 
         const contextForRecommendations = {
           ...userContext,
           org_type: userContext.org_type || 'for_profit',
           org_size: userContext.org_size || 'small',
-          achievement_focus: userContext.achievement_focus || ['Innovation'],
+          achievement_focus: (userContext as any).achievement_focus || ['Innovation'],
         };
 
         const recommendations = await recommendationEngine.generateRecommendations(contextForRecommendations as any, {
@@ -238,7 +288,21 @@ export class UnifiedChatbotService {
         yield { type: 'recommendations', data: recommendations, count: recommendations.length };
       }
 
-      logger.info('unified_chat_complete', { update_keys: updateKeys, ai_ready: intake.ready_for_recommendations });
+      logger.info('unified_chat_complete', {
+        intake_pending_field: pendingField,
+        intake_ready: plan.ready_for_recommendations,
+        intake_next_field: effectiveNextField,
+        update_keys: Object.keys(plan.updates || {}),
+        basics_present: {
+          user_name: !!userContext.user_name,
+          user_email: !!userContext.user_email,
+          nomination_subject: !!userContext.nomination_subject,
+          org_type: !!userContext.org_type,
+          gender_programs_opt_in: userContext.gender_programs_opt_in !== undefined,
+          recognition_scope: !!userContext.recognition_scope,
+          description: !!userContext.description,
+        },
+      });
     } catch (error: any) {
       if (error?.code === 'OnboardingRequired') throw error;
       if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;

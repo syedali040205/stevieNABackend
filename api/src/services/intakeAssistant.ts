@@ -1,91 +1,110 @@
 import { openaiService } from './openaiService';
 import logger from '../utils/logger';
+import type { IntakeField } from './intakeFlow';
 
-export type IntakeAssistantResult = {
+export type IntakeAssistantPlanResult = {
   updates: Record<string, any>;
+  next_field: IntakeField | null;
   next_question: string;
   ready_for_recommendations: boolean;
 };
 
-function buildPrompt(params: {
-  message: string;
-  userContext: any;
-  conversationHistory: Array<{ role: string; content: string }>;
-}): string {
-  const { message, userContext, conversationHistory } = params;
+const INTAKE_FIELDS: IntakeField[] = [
+  'user_name',
+  'user_email',
+  'nomination_subject',
+  'org_type',
+  'gender_programs_opt_in',
+  'recognition_scope',
+  'geography',
+  'description',
+  'achievement_impact',
+  'achievement_innovation',
+  'achievement_challenges',
+];
+
+function buildPrompt(params: { userContext: any; message: string }): string {
+  const { userContext, message } = params;
 
   const contextSummary = Object.entries(userContext || {})
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .slice(0, 60)
-    .map(([k, v]) => `${k}: ${String(v).substring(0, 200)}`)
+    .filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '')
+    .slice(0, 80)
+    .map(([k, v]) => `${k}: ${String(v).substring(0, 300)}`)
     .join('\n');
 
-  const recentHistory = (conversationHistory || []).slice(-12);
-  const historyText = recentHistory.map((m) => `${m.role}: ${m.content}`).join('\n');
+  return `You are a friendly Stevie Awards assistant having a natural conversation. Talk like a helpful colleague, not a form.
 
-  return `You are a Stevie Awards assistant helping a user provide details so you can recommend award categories.
+Look at what you already know and what the user just said. Extract any info and ask the next question naturally.
 
-This is an OPEN-ENDED conversation: you may ask questions in any order, but you must gather the required info listed below.
-
-REQUIRED FIELDS (must be present before recommendations):
-- user_name (string)
-- user_email (string, valid email)
-- nomination_subject (one of: individual|team|organization|product)
-- geography (string)
-- description (string, 20-800 chars)
-- achievement_impact (string or "__skipped__")
-- achievement_innovation (string or "__skipped__")
-- achievement_challenges (string or "__skipped__")
-
-OPTIONAL FIELDS (collect if naturally offered, but do not force):
-- org_type (string)
-- career_stage (string)
+REQUIRED info (collect these before recommendations):
+- user_name
+- user_email
+- nomination_subject (individual|team|organization|product)
+- org_type (for_profit|non_profit)
 - gender_programs_opt_in (true|false|"__skipped__")
-- company_age (string)
-- org_size (string)
-- tech_orientation (string)
-- recognition_scope (one of: us_only|global|both)
-- team_size (integer)
-- company_size (integer)
+- recognition_scope (us_only|global|both)
+- description
 
-WHAT WE ALREADY KNOW:
-${contextSummary || 'Nothing yet'}
+OPTIONAL follow-ups (ask 1-2 ONLY after description to enrich):
+- achievement_impact
+- achievement_innovation
+- achievement_challenges
 
-RECENT CONVERSATION:
-${historyText || 'No history'}
+Allowed field names:
+${INTAKE_FIELDS.join(', ')}
 
-USER'S LATEST MESSAGE:
+HOW TO ASK NATURALLY (vary your phrasing, reference context):
+- user_name: "What's your name?" / "And you are?" / "Who should I put down for this?"
+- user_email: "What's your email?" / "And your email address?" / "Email?"
+- nomination_subject: "Got it! Are we nominating an individual, a team, an organization, or a product?" / "Is this for a person, team, company, or product?"
+- org_type: "Is this a for-profit or non-profit?" / "For-profit company or non-profit organization?" / "Profit or non-profit?"
+- gender_programs_opt_in: "Interested in women-focused awards too?" / "Would you like to be considered for women's leadership categories? (yes/no/skip)" / "Want to include women-specific awards?"
+- recognition_scope: "Are you looking at US awards, international, or both?" / "US-only or global awards?" / "Interested in just US awards or worldwide?"
+- description: "Tell me about the achievement!" / "What makes this special?" / "What did they accomplish?" / "What's the story here?"
+- achievement_impact: "What kind of impact did this have?" / "Any measurable results?" / "How did this affect people or the business?"
+- achievement_innovation: "What made this innovative?" / "What was unique about this approach?" / "What set this apart?"
+- achievement_challenges: "What obstacles did they overcome?" / "Any challenges along the way?" / "What made this difficult?"
+
+CONTEXT-AWARE EXAMPLES:
+- If they mention "team" → "Great! What's your name?"
+- If they give name → "Thanks [name]! What's your email?"
+- If they describe achievement → "That sounds impressive! What kind of impact did it have?"
+- After 1 follow-up → "Perfect! Let me find the best categories for you."
+
+Email validation rule:
+- If user_email exists but invalid (no @ or no . after @), set next_field="user_email" and next_question EXACTLY:
+this email structure is not valid please type correct email ok
+
+Current context:
+${contextSummary || 'Just starting'}
+
+User just said:
 "${message}"
 
-YOUR TASK:
-Return ONLY valid JSON with EXACTLY these keys:
+Return ONLY valid JSON:
 {
-  "updates": { ... },
+  "updates": {"field": "value"},
+  "next_field": "user_name" | "user_email" | "nomination_subject" | "org_type" | "gender_programs_opt_in" | "recognition_scope" | "geography" | "description" | "achievement_impact" | "achievement_innovation" | "achievement_challenges" | null,
   "next_question": "...",
   "ready_for_recommendations": true|false
 }
 
-RULES:
-- updates: include ONLY fields you can confidently extract from the latest user message (do not guess).
-- You may update multiple fields if the user provided multiple pieces of info.
-- For team_size/company_size: return an INTEGER; convert number words to digits if clear.
-- If the user explicitly says skip/not sure/nope/n/a for the achievement follow-ups, set that field to "__skipped__".
-- next_question: must be max 2 sentences; ask exactly ONE helpful question that moves us toward missing required fields.
-- Do not repeat questions for fields we already have.
-- If ready_for_recommendations is true, next_question should be a short confirmation sentence (max 2 sentences) like "Perfect — I have everything I need...".
-- Do not include markdown, code fences, or extra keys.`;
+Rules:
+- Sound human - vary phrasing, acknowledge what they said, use their name if you have it
+- Extract fields from their message into updates
+- Ask ONE question (1-2 sentences)
+- Don't ask for fields already collected
+- After description, ask 1-2 optional follow-ups max (not all 3)
+- When ready: "Perfect! Let me find the best categories for you." or similar
+- No markdown`;
 }
 
-export class IntakeAssistant {
-  async run(params: {
-    message: string;
-    userContext: any;
-    conversationHistory: Array<{ role: string; content: string }>;
-    signal?: AbortSignal;
-  }): Promise<IntakeAssistantResult> {
-    const { message, userContext, conversationHistory, signal } = params;
 
-    const prompt = buildPrompt({ message, userContext, conversationHistory });
+export class IntakeAssistant {
+  async planNext(params: { userContext: any; message: string; signal?: AbortSignal }): Promise<IntakeAssistantPlanResult> {
+    const { userContext, message, signal } = params;
+
+    const prompt = buildPrompt({ userContext, message });
 
     const raw = await openaiService.chatCompletion({
       messages: [{ role: 'user', content: prompt }],
@@ -103,14 +122,33 @@ export class IntakeAssistant {
 
     try {
       const parsed = JSON.parse(text);
-      const updates = parsed?.updates && typeof parsed.updates === 'object' ? parsed.updates : {};
-      const next_question = typeof parsed?.next_question === 'string' ? parsed.next_question : '';
+      const next_question = typeof parsed?.next_question === 'string' ? parsed.next_question.trim() : '';
       const ready_for_recommendations = !!parsed?.ready_for_recommendations;
+      const next_field = parsed?.next_field ?? null;
+      const updatesRaw = parsed?.updates && typeof parsed.updates === 'object' ? parsed.updates : {};
 
-      return { updates, next_question, ready_for_recommendations };
+      // Filter updates to allowed keys only.
+      const updates: Record<string, any> = {};
+      for (const k of Object.keys(updatesRaw)) {
+        if (INTAKE_FIELDS.includes(k as IntakeField)) updates[k] = updatesRaw[k];
+      }
+
+      const normalizedNextField: IntakeField | null = INTAKE_FIELDS.includes(next_field) ? (next_field as IntakeField) : null;
+
+      return {
+        updates,
+        next_field: normalizedNextField,
+        next_question: next_question || 'Okay — what should I ask next?',
+        ready_for_recommendations,
+      };
     } catch (e: any) {
-      logger.warn('intake_assistant_parse_failed', { error: e.message, text: text.substring(0, 500) });
-      return { updates: {}, next_question: '', ready_for_recommendations: false };
+      logger.warn('intake_assistant_plan_parse_failed', { error: e.message, text: text.substring(0, 400) });
+      return {
+        updates: {},
+        next_field: 'user_name',
+        next_question: "What's your name for the nomination?",
+        ready_for_recommendations: false,
+      };
     }
   }
 }

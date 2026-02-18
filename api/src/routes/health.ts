@@ -118,10 +118,10 @@ router.get("/", async (_req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Return 503 only if database, session storage, or Redis is down (critical).
-    // AI service being down is degraded but not a full outage — the API
-    // itself is still reachable and can serve non-AI requests.
-    const criticalHealthy = isDatabaseHealthy && isSessionStorageHealthy && isRedisHealthy;
+    // Return 503 only if database or session storage is down (critical).
+    // Redis and AI service being down is degraded but not a full outage — the API
+    // has graceful degradation for Redis and can serve requests without AI service.
+    const criticalHealthy = isDatabaseHealthy && isSessionStorageHealthy;
     const statusCode = criticalHealthy ? 200 : 503;
 
     res.status(statusCode).json(healthStatus);

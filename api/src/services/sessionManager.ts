@@ -2,6 +2,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../config/supabase';
 import logger from '../utils/logger';
 import { cacheManager } from './cacheManager';
+import type { IntakeField } from './intakeFlow';
 
 /**
  * UserContext structure extracted from conversation
@@ -32,6 +33,11 @@ export interface UserContext {
   nomination_subject?: 'company' | 'individual' | 'team' | 'product';
   achievement_focus?: string[];
   description?: string;
+
+  // Achievement follow-ups (intakeFlow requires these; can be "__skipped__")
+  achievement_impact?: string;
+  achievement_innovation?: string;
+  achievement_challenges?: string;
 }
 
 /**
@@ -48,6 +54,11 @@ export interface Message {
 export interface SessionData {
   user_context: UserContext;
   conversation_history: Message[];
+  /**
+   * Deterministic recommendation-intake state: which field we are currently collecting.
+   * This prevents LLM-driven loops and ensures user answers are applied to the intended field.
+   */
+  pending_field?: IntakeField | null;
 }
 
 /**
@@ -66,7 +77,7 @@ export interface Session {
 /**
  * Conversation state enum
  */
-export type ConversationState = 
+export type ConversationState =
   | 'collecting_geography'
   | 'collecting_org_type'
   | 'collecting_org_size'
@@ -79,7 +90,7 @@ export type ConversationState =
 /**
  * Session Manager for handling conversation sessions in Supabase
  * Implements CRUD operations with automatic expiry handling (1 hour TTL)
- * 
+ *
  * Storage: PostgreSQL only (Redis removed for simplicity)
  */
 export class SessionManager {
@@ -97,11 +108,7 @@ export class SessionManager {
    * @param initialState - Initial conversation state (default: 'collecting_org_type')
    * @returns Created session with ID
    */
-  async createSession(
-    userId: string,
-    initialContext: UserContext,
-    initialState: ConversationState = 'collecting_org_type'
-  ): Promise<Session> {
+  async createSession(userId: string, initialContext: UserContext, initialState: ConversationState = 'collecting_org_type'): Promise<Session> {
     const expiresAt = new Date(Date.now() + this.SESSION_TTL_MS);
 
     const { data, error } = await this.client
@@ -110,10 +117,11 @@ export class SessionManager {
         user_id: userId,
         session_data: {
           user_context: initialContext,
-          conversation_history: []
+          conversation_history: [],
+          pending_field: null,
         },
         conversation_state: initialState,
-        expires_at: expiresAt.toISOString()
+        expires_at: expiresAt.toISOString(),
       })
       .select()
       .single();
@@ -127,10 +135,10 @@ export class SessionManager {
     }
 
     const session = data as Session;
-    
-    logger.info('session_created', { 
+
+    logger.info('session_created', {
       session_id: session.id,
-      user_id: userId 
+      user_id: userId,
     });
 
     return session;
@@ -167,12 +175,12 @@ export class SessionManager {
     }
 
     const session = data as Session;
-    
+
     // Store in Redis cache (fire and forget)
     cacheManager.setSession(sessionId, session).catch((err) => {
       logger.warn('session_cache_write_failed', { error: err.message });
     });
-    
+
     logger.debug('session_fetched', { session_id: sessionId });
 
     return session;
@@ -186,11 +194,7 @@ export class SessionManager {
    * @param conversationState - Updated conversation state
    * @returns Updated session
    */
-  async updateSession(
-    sessionId: string,
-    sessionData: SessionData,
-    conversationState: ConversationState
-  ): Promise<Session> {
+  async updateSession(sessionId: string, sessionData: SessionData, conversationState: ConversationState): Promise<Session> {
     const { data, error } = await this.client
       .from('user_sessions')
       .update({
@@ -211,12 +215,12 @@ export class SessionManager {
     }
 
     const session = data as Session;
-    
+
     // Update Redis cache (fire and forget)
     cacheManager.setSession(sessionId, session).catch((err) => {
       logger.warn('session_cache_update_failed', { error: err.message });
     });
-    
+
     logger.debug('session_updated', { session_id: sessionId });
 
     return session;
@@ -229,20 +233,17 @@ export class SessionManager {
    * @returns True if deleted successfully
    */
   async deleteSession(sessionId: string): Promise<boolean> {
-    const { error } = await this.client
-      .from('user_sessions')
-      .delete()
-      .eq('id', sessionId);
+    const { error } = await this.client.from('user_sessions').delete().eq('id', sessionId);
 
     if (error) {
       throw new Error(`Failed to delete session: ${error.message}`);
     }
-    
+
     // Delete from Redis cache (fire and forget)
     cacheManager.deleteSession(sessionId).catch((err) => {
       logger.warn('session_cache_delete_failed', { error: err.message });
     });
-    
+
     logger.info('session_deleted', { session_id: sessionId });
 
     return true;
@@ -273,8 +274,7 @@ export class SessionManager {
    * @returns Number of sessions deleted
    */
   async cleanupExpiredSessions(): Promise<number> {
-    const { data, error } = await this.client
-      .rpc('cleanup_expired_sessions');
+    const { data, error } = await this.client.rpc('cleanup_expired_sessions');
 
     if (error) {
       throw new Error(`Failed to cleanup expired sessions: ${error.message}`);
@@ -291,10 +291,7 @@ export class SessionManager {
   async checkHealth(): Promise<boolean> {
     try {
       // Try to query sessions table
-      const { error } = await this.client
-        .from('user_sessions')
-        .select('id')
-        .limit(1);
+      const { error } = await this.client.from('user_sessions').select('id').limit(1);
 
       return !error;
     } catch (error) {
@@ -314,7 +311,7 @@ export class SessionManager {
     const { data, error } = await this.client
       .from('user_sessions')
       .update({
-        expires_at: newExpiresAt.toISOString()
+        expires_at: newExpiresAt.toISOString(),
       })
       .eq('id', sessionId)
       .select()
@@ -329,7 +326,7 @@ export class SessionManager {
     }
 
     const session = data as Session;
-    
+
     logger.info('session_extended', { session_id: sessionId });
 
     return session;

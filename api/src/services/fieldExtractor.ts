@@ -15,15 +15,15 @@ Return ONLY valid JSON. Omit fields you didn't find. If none found, return {}.
 Fields:
 - user_name: string
 - user_email: string (valid)
-- geography: string
-- org_type: string
-- career_stage: string
+- nomination_subject: one of individual|team|organization|product
+- org_type: one of for_profit|non_profit
 - gender_programs_opt_in: boolean or "__skipped__"
+- recognition_scope: one of us_only|global|both
+- geography: string
+- career_stage: string
 - company_age: string
 - org_size: string
 - tech_orientation: string
-- recognition_scope: one of us_only|global|both
-- nomination_subject: one of individual|team|organization|product
 - team_size: number
 - company_size: number
 - description: string (20-800 chars)
@@ -80,15 +80,15 @@ export class FieldExtractor {
     const keys = [
       'user_name',
       'user_email',
-      'geography',
+      'nomination_subject',
       'org_type',
-      'career_stage',
       'gender_programs_opt_in',
+      'recognition_scope',
+      'geography',
+      'career_stage',
       'company_age',
       'org_size',
       'tech_orientation',
-      'recognition_scope',
-      'nomination_subject',
       'team_size',
       'company_size',
       'description',
@@ -143,11 +143,16 @@ export class FieldExtractor {
         if (geo.length >= 2 && geo.length <= 160) cleaned.geography = geo;
       }
 
-      for (const k of ['org_type', 'career_stage', 'company_age', 'org_size', 'tech_orientation']) {
+      for (const k of ['career_stage', 'company_age', 'org_size', 'tech_orientation']) {
         if (typeof result[k] === 'string') {
           const v = result[k].trim();
           if (v.length >= 2 && v.length <= 160) cleaned[k] = v;
         }
+      }
+
+      if (typeof result.org_type === 'string') {
+        const orgType = result.org_type.trim().toLowerCase();
+        if (['for_profit', 'non_profit'].includes(orgType)) cleaned.org_type = orgType;
       }
 
       if (typeof result.gender_programs_opt_in === 'boolean') {
