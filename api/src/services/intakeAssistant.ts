@@ -91,12 +91,21 @@ Return ONLY valid JSON:
 
 Rules:
 - Sound human - vary phrasing, acknowledge what they said, use their name if you have it
-- Extract fields from their message into updates
+- CRITICAL: Always extract the answer to your last question into updates! If you just asked for name and they gave "John", put {"user_name": "John"} in updates
+- Extract ALL fields you can identify from their message
 - Ask ONE question (1-2 sentences)
 - Don't ask for fields already collected
 - After description, ask 1-2 optional follow-ups max (not all 3)
 - When ready: "Perfect! Let me find the best categories for you." or similar
-- No markdown`;
+- No markdown
+
+EXTRACTION EXAMPLES:
+- You asked for name, they said "John Smith" → updates: {"user_name": "John Smith"}
+- You asked for email, they said "john@example.com" → updates: {"user_email": "john@example.com"}
+- You asked org type, they said "for-profit" → updates: {"org_type": "for_profit"}
+- You asked women awards, they said "yes" → updates: {"gender_programs_opt_in": true}
+- You asked scope, they said "both" → updates: {"recognition_scope": "both"}
+- They describe achievement → updates: {"description": "their description text"}`;
 }
 
 

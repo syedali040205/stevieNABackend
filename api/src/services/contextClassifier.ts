@@ -19,7 +19,43 @@ interface ContextResult {
   reasoning: string;
 }
 
+const FEW_SHOT_EXAMPLES = `
+## Classification Examples
+
+Example 1:
+Message: "I want to nominate my team for an innovation award"
+Context: recommendation
+Confidence: 0.95
+Reasoning: Clear nomination intent
+
+Example 2:
+Message: "What's the deadline for the Technology Excellence program?"
+Context: qa
+Confidence: 0.90
+Reasoning: Factual question about deadline
+
+Example 3:
+Message: "We developed an AI product that won first place at a hackathon"
+Context: recommendation
+Confidence: 0.85
+Reasoning: Describing achievement for nomination (implicit intent)
+
+Example 4:
+Message: "How much does it cost to enter?"
+Context: qa
+Confidence: 0.90
+Reasoning: Factual question about fees
+
+Example 5:
+Message: "I'm not sure which category fits my product"
+Context: recommendation
+Confidence: 0.80
+Reasoning: Seeking category recommendations
+`;
+
 const SYSTEM_PROMPT = `You are a context classifier for a Stevie Awards chatbot.
+
+${FEW_SHOT_EXAMPLES}
 
 Your job is to determine the conversation MODE based on what the user wants:
 
@@ -63,7 +99,56 @@ Respond with ONLY valid JSON:
 
 export class ContextClassifier {
   /**
-   * Classify conversation context
+   * Quick pattern-based classification (Stage 1: Fast path)
+   * Returns null if no high-confidence match found
+   */
+  private quickClassify(message: string): {
+    context: ConversationContext | null;
+    confidence: number;
+  } {
+    const messageLower = message.toLowerCase().trim();
+
+    // Nomination patterns (HIGH confidence)
+    const nominationPatterns = [
+      /\b(nominate|nomination)\b/i,
+      /\b(find categor|recommend categor)\b/i,
+      /\b(which award|what award)\b.*\b(should|enter|apply|nominate)\b/i,
+      /\b(help me find)\b.*\b(award|categor)\b/i,
+      /\b(want to nominate|would like to nominate|looking to nominate|interested in nominating)\b/i,
+      /\b(apply for|enter for|submit for)\b.*\b(award|categor)\b/i,
+    ];
+
+    // Q&A patterns (HIGH confidence)
+    const qaPatterns = [
+      /\b(what is|when is|how much|where is)\b.*\b(deadline|fee|cost|eligibility|price)\b/i,
+      /\b(tell me about|explain|how does|how do)\b.*\b(judging|process|program|work)\b/i,
+      /\b(deadline|due date)\b.*\b(for|when)\b/i,
+      /\b(cost|price|fee)\b.*\b(to enter|to submit|to apply)\b/i,
+      /\b(eligibility|eligible|requirements|criteria)\b/i,
+    ];
+
+    // Check nomination patterns first (higher priority)
+    for (const pattern of nominationPatterns) {
+      if (pattern.test(messageLower)) {
+        return { context: 'recommendation', confidence: 0.90 };
+      }
+    }
+
+    // Check Q&A patterns
+    for (const pattern of qaPatterns) {
+      if (pattern.test(messageLower)) {
+        return { context: 'qa', confidence: 0.85 };
+      }
+    }
+
+    // No high-confidence match
+    return { context: null, confidence: 0.0 };
+  }
+
+  /**
+   * Classify conversation context using hybrid approach
+   * Stage 1: Fast pattern matching (80% of requests)
+   * Stage 2: LLM classification for ambiguous cases (20% of requests)
    */
   async classifyContext(params: {
     message: string;
@@ -79,39 +164,23 @@ export class ContextClassifier {
       current_context: currentContext,
     });
 
-    // Quick keyword check for obvious recommendation requests
-    const messageLower = message.toLowerCase().trim();
-    const nominationKeywords = [
-      'nominate',
-      'nomination',
-      'find categor',
-      'recommend categor',
-      'which award',
-      'what award',
-      'help me find',
-      'want to nominate',
-      'would like to nominate',
-      'looking to nominate',
-      'interested in nominating',
-      'apply for',
-      'enter for',
-      'submit for',
-    ];
-    const hasNominationKeyword = nominationKeywords.some((kw) => messageLower.includes(kw));
-
-    if (hasNominationKeyword) {
-      logger.info('context_classified_by_keyword', {
-        context: 'recommendation',
-        keyword_matched: true,
+    // Stage 1: Try fast pattern-based classification
+    const quick = this.quickClassify(message);
+    if (quick.context && quick.confidence > 0.80) {
+      logger.info('context_classified_by_pattern', {
+        context: quick.context,
+        confidence: quick.confidence,
+        method: 'fast_path',
         message: message.substring(0, 50),
       });
       return {
-        context: 'recommendation',
-        confidence: 0.95,
-        reasoning: 'User mentioned nomination/category keywords',
+        context: quick.context,
+        confidence: quick.confidence,
+        reasoning: 'Matched high-confidence pattern',
       };
     }
 
+    // Stage 2: Fall back to LLM for ambiguous cases
     try {
       const userPrompt = this.buildUserPrompt(message, conversationHistory, currentContext, userContext);
 
@@ -130,6 +199,7 @@ export class ContextClassifier {
       logger.info('context_classified', {
         context: result.context,
         confidence: result.confidence,
+        method: 'llm_fallback',
         switched: currentContext && currentContext !== result.context,
       });
 
@@ -150,7 +220,7 @@ export class ContextClassifier {
   }
 
   /**
-   * Build user prompt
+   * Build user prompt for LLM classification
    */
   private buildUserPrompt(
     message: string,
