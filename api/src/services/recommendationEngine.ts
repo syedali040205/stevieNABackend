@@ -186,22 +186,17 @@ export class RecommendationEngine {
         note: 'Geographic filtering handled by database search function',
       });
 
-      // Step 3: Generate user embedding and query text
+      // Step 3: Generate user embedding
       logger.info('step_2_generating_user_embedding');
       const userEmbedding = await this.embeddingMgr.generateUserEmbedding(context);
-      
-      // Generate query text for hybrid search (BM25 component)
-      const queryText = this.embeddingMgr.formatUserQueryText(context, true);
 
       logger.info('user_embedding_generated', {
         dimension: userEmbedding.length,
-        query_text_length: queryText.length,
       });
 
-      // Step 4: Perform hybrid or vector search based on feature flag
-      const useHybridSearch = process.env.HYBRID_SEARCH_ENABLED === 'true' || process.env.HYBRID_SEARCH_ENABLED === '1';
+      // Step 4: Perform vector search with contextual embeddings
       logger.info('step_3_similarity_search', {
-        search_type: useHybridSearch ? 'hybrid' : 'vector',
+        search_type: 'vector',
       });
       
       // Map nomination_subject to match database values
@@ -230,35 +225,19 @@ export class RecommendationEngine {
         geography: dbGeography || 'all',
         nomination_subject: dbNominationSubject,
         limit: limit,
-        search_type: useHybridSearch ? 'hybrid (BM25 + Vector)' : 'vector only',
         note: 'Searching across ALL programs with boosting for Technology Excellence'
       });
       
-      let similarityResults;
-      
-      if (useHybridSearch) {
-        // Hybrid search: BM25 + Vector with RRF
-        similarityResults = await this.embeddingMgr.performHybridSearch(
-          userEmbedding,
-          queryText,
-          dbGeography, // Pass undefined for non-USA to skip geography filter
-          dbNominationSubject, // Pass mapped nomination subject
-          limit,
-          context.org_type, // Pass org_type for metadata filtering
-          context.gender // Pass gender for metadata filtering (e.g., Women in Business awards)
-        );
-      } else {
-        // Pure vector search (fallback)
-        similarityResults = await this.embeddingMgr.performSimilaritySearch(
-          userEmbedding,
-          dbGeography, // Pass undefined for non-USA to skip geography filter
-          dbNominationSubject, // Pass mapped nomination subject
-          limit,
-          context.org_type, // Pass org_type for metadata filtering
-          context.achievement_focus, // Pass achievement_focus for metadata filtering
-          context.gender // Pass gender for metadata filtering (e.g., Women in Business awards)
-        );
-      }
+      // Pure vector search with contextual embeddings
+      const similarityResults = await this.embeddingMgr.performSimilaritySearch(
+        userEmbedding,
+        dbGeography, // Pass undefined for non-USA to skip geography filter
+        dbNominationSubject, // Pass mapped nomination subject
+        limit,
+        context.org_type, // Pass org_type for metadata filtering
+        context.achievement_focus, // Pass achievement_focus for metadata filtering
+        context.gender // Pass gender for metadata filtering (e.g., Women in Business awards)
+      );
 
       logger.info('similarity_search_complete', {
         results_count: similarityResults.length,
