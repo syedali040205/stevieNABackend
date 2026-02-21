@@ -336,8 +336,59 @@ export class UnifiedChatbotService {
       if (plan.ready_for_recommendations && this.hasMinimumForRecommendations(userContext)) {
         yield { type: 'status', message: 'Generating personalized category recommendations...' };
 
+        // Map recognition_scope to geography using database configuration
+        let geography: string | undefined;
+        const recognitionScope = (userContext as any).recognition_scope;
+        
+        if (recognitionScope) {
+          try {
+            // Fetch geography mapping from database
+            const { data: mappingData, error: mappingError } = await this.supabase
+              .from('geography_mappings')
+              .select('geography_filter')
+              .eq('recognition_scope', recognitionScope)
+              .single();
+
+            if (mappingError) {
+              logger.warn('geography_mapping_fetch_failed', {
+                recognition_scope: recognitionScope,
+                error: mappingError.message,
+              });
+              // Fallback: use recognition_scope as-is
+              geography = undefined;
+            } else if (mappingData?.geography_filter && mappingData.geography_filter.length > 0) {
+              // Use first geography from the filter array
+              geography = mappingData.geography_filter[0];
+            } else {
+              // NULL in database means no filter (search all)
+              geography = undefined;
+            }
+
+            logger.info('mapping_recognition_scope_to_geography', {
+              recognition_scope: recognitionScope,
+              mapped_geography: geography || 'all',
+              source: 'database',
+            });
+          } catch (error: any) {
+            logger.error('geography_mapping_error', {
+              recognition_scope: recognitionScope,
+              error: error.message,
+            });
+            geography = undefined;
+          }
+        }
+
+        // Map gender_programs_opt_in to gender parameter for database filtering
+        const gender = (userContext as any).gender_programs_opt_in === false 
+          ? 'opt_out'  // Explicitly exclude women's categories
+          : (userContext as any).gender_programs_opt_in === true 
+            ? 'female'  // Include women's categories
+            : null;     // No preference (include all)
+
         const contextForRecommendations = {
           ...userContext,
+          geography: geography, // Add mapped geography field
+          gender: gender, // Add mapped gender field
           org_type: userContext.org_type || 'for_profit',
           org_size: userContext.org_size || 'small',
           achievement_focus: (userContext as any).achievement_focus || ['Innovation'],

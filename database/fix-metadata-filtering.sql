@@ -74,11 +74,20 @@ BEGIN
     )
     
     -- Filter by gender (REQUIRED if provided - must match)
+    -- Note: 'Stevie Awards for Women in Business' has gender_requirement='any' (open to all)
+    -- but users may want to opt out of women-focused programs entirely
     AND (
-      user_gender IS NULL 
-      OR sc.metadata->>'gender_requirement' IS NULL
-      OR sc.metadata->>'gender_requirement' = 'any'
-      OR sc.metadata->>'gender_requirement' = user_gender
+      -- If user opted out of gender programs (user_gender = 'opt_out')
+      -- Exclude the entire "Women in Business" program
+      (user_gender = 'opt_out' AND sp.program_name != 'Stevie Awards for Women in Business')
+      -- If user specified a gender preference or no preference
+      -- Use the metadata field (most programs use this)
+      OR (user_gender != 'opt_out' AND (
+        user_gender IS NULL 
+        OR sc.metadata->>'gender_requirement' IS NULL
+        OR sc.metadata->>'gender_requirement' = 'any'
+        OR sc.metadata->>'gender_requirement' = user_gender
+      ))
     )
     
     -- NOTE: achievement_focus is NOT filtered here!
