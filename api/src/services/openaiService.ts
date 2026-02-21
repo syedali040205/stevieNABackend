@@ -3,6 +3,7 @@ import logger from '../utils/logger';
 import { createCircuitBreaker } from '../utils/circuitBreaker';
 import { openaiTokensTotal } from '../utils/metrics';
 import { cacheManager } from './cacheManager';
+import { openaiRequestQueue, QueuePriority } from './openaiRequestQueue';
 
 const OPENAI_TIMEOUT_MS = 30000;
 const RETRY_MAX_ATTEMPTS = 3;
@@ -74,18 +75,22 @@ export class OpenAIService {
     temperature?: number;
     maxTokens?: number;
     signal?: AbortSignal;
+    priority?: QueuePriority;
   }): Promise<string> {
-    const { messages, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 1000, signal } = params;
+    const { messages, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 1000, signal, priority = QueuePriority.QA } = params;
 
     try {
       const client = this.getClient();
-      const r = await openaiCircuitBreaker.fire(() =>
-        retryWithBackoff(() =>
-          client.chat.completions.create(
-            { model, messages, temperature, max_tokens: maxTokens },
-            signal ? { signal } : undefined
+      const r = await openaiRequestQueue.enqueue(
+        () => openaiCircuitBreaker.fire(() =>
+          retryWithBackoff(() =>
+            client.chat.completions.create(
+              { model, messages, temperature, max_tokens: maxTokens },
+              signal ? { signal } : undefined
+            )
           )
-        )
+        ),
+        priority
       );
       if (r?.usage) {
         openaiTokensTotal.inc({ type: 'prompt' }, r.usage.prompt_tokens ?? 0);
@@ -105,26 +110,30 @@ export class OpenAIService {
     temperature?: number;
     maxTokens?: number;
     signal?: AbortSignal;
+    priority?: QueuePriority;
   }): AsyncGenerator<string, void, unknown> {
-    const { messages, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 1000, signal } = params;
+    const { messages, model = 'gpt-4o-mini', temperature = 0.7, maxTokens = 1000, signal, priority = QueuePriority.QA } = params;
 
     let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
     try {
       const client = this.getClient();
-      stream = await openaiCircuitBreaker.fire(() =>
-        retryWithBackoff(() =>
-          client.chat.completions.create(
-            {
-              model,
-              messages,
-              temperature,
-              max_tokens: maxTokens,
-              stream: true,
-              stream_options: { include_usage: true },
-            },
-            signal ? { signal } : undefined
+      stream = await openaiRequestQueue.enqueue(
+        () => openaiCircuitBreaker.fire(() =>
+          retryWithBackoff(() =>
+            client.chat.completions.create(
+              {
+                model,
+                messages,
+                temperature,
+                max_tokens: maxTokens,
+                stream: true,
+                stream_options: { include_usage: true },
+              },
+              signal ? { signal } : undefined
+            )
           )
-        )
+        ),
+        priority
       );
     } catch (error: any) {
       if (isAbortError(error)) throw error;
@@ -148,20 +157,23 @@ export class OpenAIService {
   async generateEmbedding(
     text: string,
     model = 'text-embedding-ada-002',
-    opts?: { signal?: AbortSignal }
+    opts?: { signal?: AbortSignal; priority?: QueuePriority }
   ): Promise<number[]> {
     const cached = await cacheManager.getEmbedding(text, model);
     if (cached) return cached;
 
     try {
       const client = this.getClient();
-      const r = await openaiCircuitBreaker.fire(() =>
-        retryWithBackoff(() =>
-          client.embeddings.create(
-            { model, input: text },
-            opts?.signal ? { signal: opts.signal } : undefined
+      const r = await openaiRequestQueue.enqueue(
+        () => openaiCircuitBreaker.fire(() =>
+          retryWithBackoff(() =>
+            client.embeddings.create(
+              { model, input: text },
+              opts?.signal ? { signal: opts.signal } : undefined
+            )
           )
-        )
+        ),
+        opts?.priority ?? QueuePriority.RECOMMENDATION
       );
 
       const total = r?.usage?.total_tokens ?? 0;
@@ -180,7 +192,7 @@ export class OpenAIService {
   async generateEmbeddings(
     texts: string[],
     model = 'text-embedding-ada-002',
-    opts?: { signal?: AbortSignal }
+    opts?: { signal?: AbortSignal; priority?: QueuePriority }
   ): Promise<number[][]> {
     const batchSize = 100;
     const embeddings: number[][] = [];
@@ -205,13 +217,16 @@ export class OpenAIService {
 
       if (uncachedTexts.length > 0) {
         const client = this.getClient();
-        const r = await openaiCircuitBreaker.fire(() =>
-          retryWithBackoff(() =>
-            client.embeddings.create(
-              { model, input: uncachedTexts },
-              opts?.signal ? { signal: opts.signal } : undefined
+        const r = await openaiRequestQueue.enqueue(
+          () => openaiCircuitBreaker.fire(() =>
+            retryWithBackoff(() =>
+              client.embeddings.create(
+                { model, input: uncachedTexts },
+                opts?.signal ? { signal: opts.signal } : undefined
+              )
             )
-          )
+          ),
+          opts?.priority ?? QueuePriority.RECOMMENDATION
         );
 
         const total = r?.usage?.total_tokens ?? 0;
@@ -226,6 +241,13 @@ export class OpenAIService {
     }
 
     return embeddings;
+  }
+
+  /**
+   * Get current queue statistics
+   */
+  getQueueStats() {
+    return openaiRequestQueue.getStats();
   }
 }
 

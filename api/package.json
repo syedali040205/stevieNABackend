@@ -39,6 +39,7 @@
     "multer": "^2.0.2",
     "openai": "^4.77.0",
     "opossum": "^9.0.0",
+    "p-queue": "^8.0.1",
     "pdf-parse": "^2.4.5",
     "prom-client": "^15.1.0",
     "typescript": "^5.3.3",
