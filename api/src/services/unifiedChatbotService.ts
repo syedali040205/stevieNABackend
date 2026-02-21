@@ -93,6 +93,40 @@ export class UnifiedChatbotService {
     );
   }
 
+  /**
+   * Detect if the conversation is stuck in a loop (asking same question repeatedly).
+   * Returns true if we should break the loop and provide fallback guidance.
+   */
+  private detectConversationLoop(conversationHistory: Array<{ role: string; content: string }>): boolean {
+    if (conversationHistory.length < 6) return false;
+
+    // Check last 3 assistant messages for similarity (same question asked multiple times)
+    const recentAssistant = conversationHistory
+      .filter(msg => msg.role === 'assistant')
+      .slice(-3)
+      .map(msg => msg.content.toLowerCase().trim());
+
+    if (recentAssistant.length < 3) return false;
+
+    // Simple similarity check: if all 3 messages contain the same key phrases
+    const keyPhrases = ['tell me about', 'what', 'describe', 'achievement', 'nomination'];
+    const matches = recentAssistant.map(msg => 
+      keyPhrases.filter(phrase => msg.includes(phrase)).length
+    );
+
+    // If all 3 messages have similar structure (3+ matching key phrases), likely a loop
+    const isLoop = matches.every(count => count >= 3) && 
+                   recentAssistant[0].substring(0, 50) === recentAssistant[1].substring(0, 50);
+
+    if (isLoop) {
+      logger.warn('conversation_loop_detected', { 
+        recent_messages: recentAssistant.map(m => m.substring(0, 100))
+      });
+    }
+
+    return isLoop;
+  }
+
   async *chat(params: { sessionId: string; message: string; userId?: string; signal?: AbortSignal }): AsyncGenerator<any, void, unknown> {
     const { sessionId, message, userId, signal } = params;
 
@@ -195,6 +229,35 @@ export class UnifiedChatbotService {
       // - In the SAME LLM call, extract any additional fields from the user's message via updates,
       //   decide next missing field, and ask next question.
 
+      // Check for conversation loop before proceeding
+      if (this.detectConversationLoop(conversationHistory)) {
+        const loopBreakMessage = 
+          "I notice we might be going in circles. Let me try a different approach. " +
+          "Could you describe your achievement in simpler, more general terms? " +
+          "For example, instead of technical jargon, focus on what problem you solved and the impact it had. " +
+          "Or, if you prefer, I can show you how to browse all available award categories manually.";
+        
+        yield { type: 'chunk', content: loopBreakMessage };
+        
+        const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
+          ...conversationHistory,
+          { role: 'user' as const, content: message },
+          { role: 'assistant' as const, content: loopBreakMessage },
+        ];
+        const updatedHistory =
+          fullHistory.length > this.MAX_CONVERSATION_HISTORY ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY) : fullHistory;
+
+        await this.sessionManager.updateSession(
+          sessionId,
+          { user_context: userContext, conversation_history: updatedHistory, pending_field: null },
+          session.conversation_state as any
+        );
+
+        this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: loopBreakMessage });
+        logger.info('conversation_loop_broken');
+        return;
+      }
+
       if (pendingField) {
         const applied = applyAnswer({ pendingField, message, userContext });
         if (applied.accepted) userContext = applied.updatedContext;
@@ -285,7 +348,36 @@ export class UnifiedChatbotService {
           includeExplanations: true,
         });
 
-        yield { type: 'recommendations', data: recommendations, count: recommendations.length };
+        // Check if RAG returned no results or very low quality results
+        if (recommendations.length === 0 || (recommendations.length > 0 && recommendations[0].similarity_score < 0.3)) {
+          logger.warn('rag_retrieval_failed_or_low_quality', {
+            count: recommendations.length,
+            top_score: recommendations[0]?.similarity_score || 0,
+            description: userContext.description?.substring(0, 100)
+          });
+
+          // Provide helpful fallback guidance
+          const fallbackMessage = recommendations.length === 0
+            ? "I'm having trouble finding exact category matches for your specific achievement. This might be because your nomination is highly specialized or uses technical terminology. Here are some options:\n\n" +
+              "1. Try describing your achievement in more general terms (e.g., instead of 'IoT agricultural sensor calibration', try 'innovative technology solution for agriculture')\n\n" +
+              "2. Browse all available categories manually at [categories page]\n\n" +
+              "3. Contact our support team who can help identify the best categories for specialized achievements\n\n" +
+              "Would you like to try rephrasing your achievement, or would you prefer to browse categories manually?"
+            : "I found some potential matches, but they may not be perfect fits. The top matches have lower confidence scores, which suggests your achievement might be highly specialized. Here are your options:\n\n" +
+              "1. Review the categories below (they may still be relevant)\n\n" +
+              "2. Try rephrasing your achievement description\n\n" +
+              "3. Browse all categories manually\n\n" +
+              "Would you like to see these results, or try a different approach?";
+
+          yield { type: 'chunk', content: fallbackMessage };
+          
+          // Still return recommendations if we have any, but with the warning
+          if (recommendations.length > 0) {
+            yield { type: 'recommendations', data: recommendations, count: recommendations.length, low_confidence: true };
+          }
+        } else {
+          yield { type: 'recommendations', data: recommendations, count: recommendations.length };
+        }
       }
 
       logger.info('unified_chat_complete', {

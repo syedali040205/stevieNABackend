@@ -15,11 +15,13 @@ interface UserContext {
   achievement_focus?: string[];
   tech_orientation?: string;
   operating_scope?: string;
+  gender?: string;
 }
 
 interface Recommendation {
   category_id: string;
   category_name: string;
+  display_name?: string; // Enhanced name with industry/sub-category for duplicates
   description: string;
   program_name: string;
   program_code: string;
@@ -42,6 +44,66 @@ interface Recommendation {
 export class RecommendationEngine {
   private sqlFilter: SQLFilterEngine;
   private embeddingMgr: EmbeddingManager;
+
+  /**
+   * Extract industry/sub-category label from description for categories with same name
+   * Examples: "Examples: MRI technology..." → "Healthcare"
+   */
+  private extractIndustryLabel(description: string): string | null {
+    // Common patterns in Technology Breakthrough descriptions
+    const industryPatterns: { [key: string]: RegExp } = {
+      'Manufacturing': /robotics|3d printing|iot manufacturing|computer-aided design|cad/i,
+      'Healthcare': /mri|telemedicine|diagnostics|wearable health|medical/i,
+      'Marketing': /programmatic advertising|marketing automation/i,
+      'Aerospace': /propulsion systems|satellite technology|aerospace/i,
+      'AI & Machine Learning': /computer vision|natural language processing|generative ai|machine learning/i,
+      'Biotechnology': /genetic engineering|bioinformatics|crispr/i,
+      'Communications': /web browsers|fiber optics|5g networks|satellite internet/i,
+      'Financial Services': /blockchains|mobile wallets|digital payments|robo-advisors/i,
+      'Government': /digital constituent|online tax filing|e-government/i,
+      'Consumer Technology': /smartphones|e-commerce platforms|cloud computing/i,
+    };
+
+    for (const [industry, pattern] of Object.entries(industryPatterns)) {
+      if (pattern.test(description)) {
+        return industry;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Enhance category names for better UX when multiple categories share the same name
+   */
+  private enhanceCategoryNames(recommendations: Recommendation[]): Recommendation[] {
+    // Group by category name to find duplicates
+    const nameGroups = new Map<string, Recommendation[]>();
+    
+    recommendations.forEach(rec => {
+      const existing = nameGroups.get(rec.category_name) || [];
+      existing.push(rec);
+      nameGroups.set(rec.category_name, existing);
+    });
+
+    // Enhance names for duplicate categories
+    return recommendations.map(rec => {
+      const group = nameGroups.get(rec.category_name) || [];
+      
+      // If multiple categories share the same name, add industry label
+      if (group.length > 1) {
+        const industry = this.extractIndustryLabel(rec.description);
+        if (industry) {
+          return {
+            ...rec,
+            display_name: `${rec.category_name} - ${industry}`
+          };
+        }
+      }
+      
+      return rec;
+    });
+  }
 
   constructor(
     sqlFilter?: SQLFilterEngine,
@@ -124,16 +186,23 @@ export class RecommendationEngine {
         note: 'Geographic filtering handled by database search function',
       });
 
-      // Step 3: Generate user embedding
+      // Step 3: Generate user embedding and query text
       logger.info('step_2_generating_user_embedding');
       const userEmbedding = await this.embeddingMgr.generateUserEmbedding(context);
+      
+      // Generate query text for hybrid search (BM25 component)
+      const queryText = this.embeddingMgr.formatUserQueryText(context, true);
 
       logger.info('user_embedding_generated', {
         dimension: userEmbedding.length,
+        query_text_length: queryText.length,
       });
 
-      // Step 4: Perform similarity search with geography and nomination_subject filters
-      logger.info('step_3_similarity_search');
+      // Step 4: Perform hybrid or vector search based on feature flag
+      const useHybridSearch = process.env.HYBRID_SEARCH_ENABLED === 'true' || process.env.HYBRID_SEARCH_ENABLED === '1';
+      logger.info('step_3_similarity_search', {
+        search_type: useHybridSearch ? 'hybrid' : 'vector',
+      });
       
       // Map nomination_subject to match database values
       // Database has: 'company', 'product' (not 'individual', 'team', 'organization')
@@ -153,28 +222,43 @@ export class RecommendationEngine {
         });
       }
       
-      // Geography filter - make it optional if not USA
-      const dbGeography = context.geography === 'usa' ? 'USA' : undefined;
-      if (context.geography && context.geography !== 'usa') {
-        logger.warn('geography_not_usa_skipping_filter', { 
-          geography: context.geography,
-          note: 'Database only has USA categories, searching all geographies'
-        });
-      }
+      // Geography filter - pass the geography value to database for filtering
+      // Database has: USA, Global, Asia, Pacific, Middle East, North Africa
+      const dbGeography = context.geography || undefined;
       
       logger.info('search_parameters', {
         geography: dbGeography || 'all',
         nomination_subject: dbNominationSubject,
         limit: limit,
+        search_type: useHybridSearch ? 'hybrid (BM25 + Vector)' : 'vector only',
         note: 'Searching across ALL programs with boosting for Technology Excellence'
       });
       
-      const similarityResults = await this.embeddingMgr.performSimilaritySearch(
-        userEmbedding,
-        dbGeography, // Pass undefined for non-USA to skip geography filter
-        dbNominationSubject, // Pass mapped nomination subject
-        limit
-      );
+      let similarityResults;
+      
+      if (useHybridSearch) {
+        // Hybrid search: BM25 + Vector with RRF
+        similarityResults = await this.embeddingMgr.performHybridSearch(
+          userEmbedding,
+          queryText,
+          dbGeography, // Pass undefined for non-USA to skip geography filter
+          dbNominationSubject, // Pass mapped nomination subject
+          limit,
+          context.org_type, // Pass org_type for metadata filtering
+          context.gender // Pass gender for metadata filtering (e.g., Women in Business awards)
+        );
+      } else {
+        // Pure vector search (fallback)
+        similarityResults = await this.embeddingMgr.performSimilaritySearch(
+          userEmbedding,
+          dbGeography, // Pass undefined for non-USA to skip geography filter
+          dbNominationSubject, // Pass mapped nomination subject
+          limit,
+          context.org_type, // Pass org_type for metadata filtering
+          context.achievement_focus, // Pass achievement_focus for metadata filtering
+          context.gender // Pass gender for metadata filtering (e.g., Women in Business awards)
+        );
+      }
 
       logger.info('similarity_search_complete', {
         results_count: similarityResults.length,
@@ -212,11 +296,11 @@ export class RecommendationEngine {
           program_name: result.program_name,
           program_code: result.program_code,
           similarity_score: result.similarity_score,
-          geographic_scope: result.geographic_scope,
-          applicable_org_types: result.applicable_org_types,
-          applicable_org_sizes: result.applicable_org_sizes,
-          nomination_subject_type: result.nomination_subject_type,
-          achievement_focus: result.achievement_focus,
+          geographic_scope: result.metadata?.geographic_scope || result.geographic_scope,
+          applicable_org_types: result.metadata?.applicable_org_types || result.applicable_org_types,
+          applicable_org_sizes: result.metadata?.applicable_org_sizes || result.applicable_org_sizes,
+          nomination_subject_type: result.metadata?.nomination_subject_type || result.nomination_subject_type,
+          achievement_focus: result.metadata?.achievement_focus || result.achievement_focus,
         }));
 
       // Step 6: Optionally enrich with explanations
@@ -256,6 +340,9 @@ export class RecommendationEngine {
           });
         }
       }
+
+      // Enhance category names for better UX (add industry labels to duplicates)
+      recommendations = this.enhanceCategoryNames(recommendations);
 
       logger.info('recommendations_generated', {
         total_recommendations: recommendations.length,
