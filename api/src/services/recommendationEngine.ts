@@ -21,7 +21,6 @@ interface UserContext {
 interface Recommendation {
   category_id: string;
   category_name: string;
-  display_name?: string; // Enhanced name with industry/sub-category for duplicates
   description: string;
   program_name: string;
   program_code: string;
@@ -44,66 +43,6 @@ interface Recommendation {
 export class RecommendationEngine {
   private sqlFilter: SQLFilterEngine;
   private embeddingMgr: EmbeddingManager;
-
-  /**
-   * Extract industry/sub-category label from description for categories with same name
-   * Examples: "Examples: MRI technology..." → "Healthcare"
-   */
-  private extractIndustryLabel(description: string): string | null {
-    // Common patterns in Technology Breakthrough descriptions
-    const industryPatterns: { [key: string]: RegExp } = {
-      'Manufacturing': /robotics|3d printing|iot manufacturing|computer-aided design|cad/i,
-      'Healthcare': /mri|telemedicine|diagnostics|wearable health|medical/i,
-      'Marketing': /programmatic advertising|marketing automation/i,
-      'Aerospace': /propulsion systems|satellite technology|aerospace/i,
-      'AI & Machine Learning': /computer vision|natural language processing|generative ai|machine learning/i,
-      'Biotechnology': /genetic engineering|bioinformatics|crispr/i,
-      'Communications': /web browsers|fiber optics|5g networks|satellite internet/i,
-      'Financial Services': /blockchains|mobile wallets|digital payments|robo-advisors/i,
-      'Government': /digital constituent|online tax filing|e-government/i,
-      'Consumer Technology': /smartphones|e-commerce platforms|cloud computing/i,
-    };
-
-    for (const [industry, pattern] of Object.entries(industryPatterns)) {
-      if (pattern.test(description)) {
-        return industry;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Enhance category names for better UX when multiple categories share the same name
-   */
-  private enhanceCategoryNames(recommendations: Recommendation[]): Recommendation[] {
-    // Group by category name to find duplicates
-    const nameGroups = new Map<string, Recommendation[]>();
-    
-    recommendations.forEach(rec => {
-      const existing = nameGroups.get(rec.category_name) || [];
-      existing.push(rec);
-      nameGroups.set(rec.category_name, existing);
-    });
-
-    // Enhance names for duplicate categories
-    return recommendations.map(rec => {
-      const group = nameGroups.get(rec.category_name) || [];
-      
-      // If multiple categories share the same name, add industry label
-      if (group.length > 1) {
-        const industry = this.extractIndustryLabel(rec.description);
-        if (industry) {
-          return {
-            ...rec,
-            display_name: `${rec.category_name} - ${industry}`
-          };
-        }
-      }
-      
-      return rec;
-    });
-  }
 
   constructor(
     sqlFilter?: SQLFilterEngine,
@@ -319,9 +258,6 @@ export class RecommendationEngine {
           });
         }
       }
-
-      // Enhance category names for better UX (add industry labels to duplicates)
-      recommendations = this.enhanceCategoryNames(recommendations);
 
       logger.info('recommendations_generated', {
         total_recommendations: recommendations.length,

@@ -30,7 +30,6 @@ interface SimilarityResult {
   category_id: string;
   similarity_score: number;
   category_name: string;
-  industry_label?: string; // Industry label from database for duplicate category names
   description: string;
   program_name: string;
   program_code: string;
