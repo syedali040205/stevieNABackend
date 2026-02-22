@@ -1,5 +1,3 @@
-import { GeographyMapper, type NominationScope } from '../utils/geographyMapper';
-
 export type IntakeField =
   | 'user_name'
   | 'user_email'

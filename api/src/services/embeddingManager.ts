@@ -478,9 +478,9 @@ Return ONLY a JSON array of 1-2 category types, e.g.: ["healthcare_medical", "so
   async performSimilaritySearch(
     userEmbedding: number[],
     userGeographies?: string[], // Array but we'll use first element only
-    userNominationSubject?: string,
+    _userNominationSubject?: string, // Unused - kept for backward compatibility
     limit: number = 10,
-    userOrgType?: string,
+    _userOrgType?: string, // Unused - kept for backward compatibility
     userAchievementFocus?: string[],
     userGender?: string
   ): Promise<SimilarityResult[]> {

@@ -136,7 +136,7 @@ export class RecommendationEngine {
       });
 
       // Step 3.5: Intent detection DISABLED (was causing issues)
-      const categoryTypes = undefined;
+      // const categoryTypes = undefined;
       
       logger.info('intent_detection_complete', {
         category_types: 'all',
@@ -150,9 +150,10 @@ export class RecommendationEngine {
       
       // Geography filter - single geography (working version before migration 009)
       const userLocation = context.geography;
-      const dbGeography = userLocation 
-        ? GeographyMapper.mapGeography(userLocation, 'regional')[0] // Just use first geography
-        : undefined;
+      const mappedGeographies = userLocation 
+        ? GeographyMapper.mapGeography(userLocation, 'regional')
+        : null;
+      const dbGeography = mappedGeographies ? mappedGeographies[0] : null;
       
       logger.info('search_parameters', {
         user_location: userLocation || 'not specified',
@@ -165,9 +166,9 @@ export class RecommendationEngine {
       const similarityResults = await this.embeddingMgr.performSimilaritySearch(
         userEmbedding,
         dbGeography ? [dbGeography] : undefined, // Single geography
-        null, // nomination_subject - not used
+        undefined, // nomination_subject - not used
         limit,
-        null, // org_type - not used  
+        undefined, // org_type - not used  
         context.achievement_focus, // Used for keyword boost scoring
         context.gender // Pass gender for metadata filtering
       );
