@@ -15,6 +15,8 @@ interface UserContext {
   tech_orientation?: string;
   operating_scope?: string;
   gender?: string; // 'male', 'female', 'other', 'prefer_not_to_say'
+  achievement_impact?: string; // Impact description for intent detection
+  achievement_innovation?: string; // Innovation description for intent detection
 }
 
 interface Category {
@@ -171,8 +173,12 @@ export class EmbeddingManager {
 
 Rules:
 - Start with "Focus areas: " and list/expand their focus areas with related terms (e.g. Innovation → breakthrough achievements, pioneering work).
-- Then expand the achievement description with: specific technologies and features, business value, industry context, and award-relevant terms (excellence, achievement, recognition, leadership).
-- Use the same style as category text: concrete nouns, no marketing fluff. Include synonyms so "AI product" also mentions "artificial intelligence", "machine learning", "technology product".
+- Then expand the achievement description based on its nature:
+  * For SOCIAL IMPACT/HUMANITARIAN achievements (helping people, community service, charitable work, healthcare, education access): emphasize social good, community impact, humanitarian initiative, life-changing impact, charitable work, social responsibility, making a difference
+  * For TECHNOLOGY/BUSINESS achievements: emphasize specific technologies, business value, industry context, innovation, technical excellence
+  * For CREATIVE/CONTENT achievements: emphasize storytelling, audience engagement, creative innovation, media excellence
+- Always include award-relevant terms (excellence, achievement, recognition, leadership, impact).
+- Use the same style as category text: concrete nouns, no marketing fluff. Include synonyms and related concepts.
 - End with "Nominating X. Organization type: Y" if known.
 - Output ONLY the paragraph, no markdown, no labels.`;
 
@@ -261,47 +267,247 @@ Rules:
     }
     
     logger.info("generated_search_query", {
-      text: queryText.substring(0, 300),
+      text: queryText.substring(0, 500), // Increased from 300 to 500 for better visibility
       rich_expansion: useRichExpansion,
     });
     return this.generateEmbedding(queryText);
   }
 
   /**
+   * Detect category types (intent) from user context using OpenAI.
+   * Analyzes the full context to determine PRIMARY intent, not just keywords.
+   * Returns array of category types to filter by, or undefined for no filtering.
+   */
+  async detectCategoryTypes(context: UserContext): Promise<string[] | undefined> {
+    const description = context.description || '';
+    const achievementImpact = context.achievement_impact || '';
+    const achievementInnovation = context.achievement_innovation || '';
+    
+    // If description is too short, fall back to keyword matching
+    if (description.length < 20) {
+      return this.detectCategoryTypesKeyword(context);
+    }
+    
+    // Check if LLM-based intent detection is enabled (default: true for better accuracy)
+    const useLLMIntent = process.env.USE_LLM_INTENT_DETECTION !== 'false';
+    
+    if (!useLLMIntent) {
+      logger.info('llm_intent_detection_disabled', { note: 'Using keyword-based detection' });
+      return this.detectCategoryTypesKeyword(context);
+    }
+    
+    try {
+      const prompt = `Analyze this achievement and identify the PRIMARY category types. Focus on the CORE ACHIEVEMENT, not the method/platform used.
+
+ACHIEVEMENT:
+Description: ${description}
+Impact: ${achievementImpact}
+Innovation: ${achievementInnovation}
+
+CATEGORY TYPES (select 1-2 PRIMARY types):
+- healthcare_medical: Medical, health, disease, surgery, vision, pharmaceutical, hospital, wellness
+- women_empowerment: Women helping women, female leadership, women's rights (NOT healthcare for women)
+- technology: Tech, software, AI, innovation, digital transformation, IT products/services
+- social_impact: CSR, community service, humanitarian, charity, non-profit, sustainability
+- business_general: Company growth, management, leadership, operations, finance
+- marketing_media: Advertising, PR, content creation, social media campaigns, communications
+- product_service: Product launches, service excellence, customer experience
+
+RULES:
+1. Focus on WHAT was achieved, not HOW it was communicated
+2. "Content creator who helped blind people" → healthcare_medical + social_impact (NOT marketing_media)
+3. "YouTube channel about cooking" → marketing_media
+4. "Company using social media for sales" → business_general (NOT marketing_media)
+5. Maximum 2 types - choose the most relevant
+
+Return ONLY a JSON array of 1-2 category types, e.g.: ["healthcare_medical", "social_impact"]`;
+
+      const responseText = await openaiService.chatCompletion({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'gpt-4o-mini',
+        temperature: 0.3,
+        maxTokens: 100,
+      });
+      
+      // Try to parse as JSON array directly or extract from object
+      let types: string[] = [];
+      try {
+        // Strip markdown code blocks if present (```json ... ```)
+        let cleanedResponse = (responseText || '').trim();
+        if (cleanedResponse.startsWith('```')) {
+          // Remove opening ```json or ``` and closing ```
+          cleanedResponse = cleanedResponse
+            .replace(/^```(?:json)?\s*\n?/, '')
+            .replace(/\n?```\s*$/, '')
+            .trim();
+        }
+        
+        const parsed = JSON.parse(cleanedResponse || '[]');
+        if (Array.isArray(parsed)) {
+          types = parsed;
+        } else if (parsed.types && Array.isArray(parsed.types)) {
+          types = parsed.types;
+        } else if (parsed.category_types && Array.isArray(parsed.category_types)) {
+          types = parsed.category_types;
+        }
+      } catch (parseError) {
+        logger.warn('intent_detection_parse_error', { response: responseText });
+      }
+      
+      if (types.length > 0) {
+        logger.info('intent_detected_llm', {
+          detected_types: types,
+          description_sample: description.substring(0, 100),
+          method: 'llm'
+        });
+        
+        // Expand related types for better recall
+        // Healthcare often overlaps with social impact
+        if (types.includes('healthcare_medical') && !types.includes('social_impact')) {
+          // Check if description mentions helping people, community, etc.
+          const socialKeywords = ['helping', 'community', 'people', 'humanitarian', 'charity', 'volunteer'];
+          if (socialKeywords.some(kw => description.toLowerCase().includes(kw))) {
+            types.push('social_impact');
+            logger.info('intent_expanded', {
+              original: types.filter(t => t !== 'social_impact'),
+              expanded: types,
+              reason: 'Healthcare with social impact keywords'
+            });
+          }
+        }
+        
+        return types;
+      }
+    } catch (error: any) {
+      logger.warn('intent_detection_failed', { error: error.message });
+      // Fall back to keyword matching
+      return this.detectCategoryTypesKeyword(context);
+    }
+    
+    // No specific intent detected - search all categories
+    logger.info('no_specific_intent_detected', {
+      note: 'Searching across all category types',
+    });
+    return undefined;
+  }
+
+  /**
+   * Fallback keyword-based intent detection.
+   * Used when LLM-based detection fails or description is too short.
+   */
+  private detectCategoryTypesKeyword(context: UserContext): string[] | undefined {
+    const description = (context.description || '').toLowerCase();
+    const achievementFocus = (context.achievement_focus || []).map(f => f.toLowerCase());
+    const achievementImpact = (context.achievement_impact || '').toLowerCase();
+    const allText = [description, achievementFocus.join(' '), achievementImpact].join(' ');
+    
+    const detectedTypes: Set<string> = new Set();
+    
+    // Healthcare/Medical keywords (HIGH PRIORITY)
+    const healthcareKeywords = ['health', 'medical', 'hospital', 'doctor', 'nurse', 'patient', 'surgery', 'treatment', 'disease', 'wellness', 'pharmaceutical', 'clinic', 'healthcare', 'vision', 'sight', 'blind', 'cataract', 'therapy', 'cure', 'diagnosis'];
+    const hasHealthcare = healthcareKeywords.some(kw => allText.includes(kw));
+    if (hasHealthcare) {
+      detectedTypes.add('healthcare_medical');
+    }
+    
+    // Social impact keywords (HIGH PRIORITY)
+    const socialKeywords = ['social impact', 'community', 'humanitarian', 'charity', 'non-profit', 'nonprofit', 'volunteer', 'csr', 'sustainability', 'environment', 'education access', 'poverty', 'helping people', 'making a difference'];
+    const hasSocial = socialKeywords.some(kw => allText.includes(kw));
+    if (hasSocial) {
+      detectedTypes.add('social_impact');
+    }
+    
+    // Women empowerment keywords (NOT healthcare for women)
+    const womenEmpowermentKeywords = ['women helping women', 'female leadership', 'women empowerment', 'women rights', 'gender equality', 'women in business'];
+    if (womenEmpowermentKeywords.some(kw => allText.includes(kw))) {
+      detectedTypes.add('women_empowerment');
+    }
+    
+    // If healthcare or social impact detected, SKIP technology/marketing detection
+    // (they used tech/media as a TOOL, not the achievement itself)
+    if (hasHealthcare || hasSocial) {
+      const types = Array.from(detectedTypes);
+      logger.info('intent_detected_primary', {
+        detected_types: types,
+        note: 'Skipped secondary types (tech/marketing) due to primary healthcare/social focus',
+      });
+      return types;
+    }
+    
+    // Only check these if NO healthcare/social impact detected
+    
+    // Technology keywords
+    const techKeywords = ['software development', 'technology product', 'ai product', 'artificial intelligence platform', 'machine learning system', 'digital product', 'app development', 'platform development', 'saas product', 'cloud service', 'data analytics product', 'cybersecurity solution', 'blockchain'];
+    if (techKeywords.some(kw => allText.includes(kw))) {
+      detectedTypes.add('technology');
+    }
+    
+    // Marketing/Media keywords
+    const marketingKeywords = ['marketing campaign', 'advertising campaign', 'pr campaign', 'public relations campaign', 'content marketing', 'social media marketing', 'video marketing', 'media campaign', 'communications campaign', 'brand campaign'];
+    if (marketingKeywords.some(kw => allText.includes(kw))) {
+      detectedTypes.add('marketing_media');
+    }
+    
+    // Product/Service keywords
+    const productKeywords = ['product launch', 'new product', 'service excellence', 'customer experience program', 'customer service innovation'];
+    if (productKeywords.some(kw => allText.includes(kw))) {
+      detectedTypes.add('product_service');
+    }
+    
+    const types = Array.from(detectedTypes);
+    
+    if (types.length > 0) {
+      logger.info('intent_detected', {
+        detected_types: types,
+        description_sample: description.substring(0, 100),
+      });
+      return types;
+    }
+    
+    // No specific intent detected - search all categories
+    logger.info('no_specific_intent_detected', {
+      note: 'Searching across all category types',
+    });
+    return undefined;
+  }
+
+  /**
    * Perform similarity search using pgvector.
-   * Optionally filters by geography and nomination_subject in the database.
+   * REVERTED TO WORKING VERSION (migration 002) - only filters by geography and gender.
    */
   async performSimilaritySearch(
     userEmbedding: number[],
-    userGeography?: string,
+    userGeographies?: string[], // Array but we'll use first element only
     userNominationSubject?: string,
     limit: number = 10,
     userOrgType?: string,
     userAchievementFocus?: string[],
-    userGender?: string,
+    userGender?: string
   ): Promise<SimilarityResult[]> {
+    // Use single geography (first element) for old function signature
+    const userGeography = userGeographies?.[0] || null;
+    
     logger.info("performing_similarity_search", {
       user_geography: userGeography || "all",
-      user_nomination_subject: userNominationSubject || "all",
-      user_org_type: userOrgType || "all",
       user_achievement_focus: userAchievementFocus?.join(", ") || "all",
       user_gender: userGender || "any",
       limit: limit,
       embedding_dimension: userEmbedding.length,
+      note: "REVERTED TO WORKING VERSION - migration 002 function signature"
     });
 
     try {
-      // Call updated function with metadata filtering parameters
+      // Call old working function (migration 002)
       const { data, error } = await this.client.rpc(
         "search_similar_categories",
         {
           query_embedding: userEmbedding,
-          user_geography: userGeography || null,
-          user_nomination_subject: userNominationSubject || null,
+          user_geography: userGeography,
+          user_nomination_subject: null, // Not used
           match_limit: limit,
-          user_org_type: userOrgType || null,
+          user_org_type: null, // Not used
           user_achievement_focus: userAchievementFocus || null,
-          user_gender: userGender || null,
+          user_gender: userGender || 'any',
         },
       );
 

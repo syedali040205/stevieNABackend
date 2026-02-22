@@ -6,7 +6,7 @@ This plan implements five critical optimizations to achieve 10x improvement in c
 
 ## Tasks
 
-- [ ] 1. Set up OpenAI Request Queue infrastructure
+- [x] 1. Set up OpenAI Request Queue infrastructure
   - Install p-queue dependency (npm install p-queue@8.0.1)
   - Create api/src/services/openaiRequestQueue.ts with queue class
   - Implement priority levels (INTAKE=1, QA/RECOMMENDATION=2, EXPLANATION=3)
@@ -26,7 +26,7 @@ This plan implements five critical optimizations to achieve 10x improvement in c
   - **Property 3: Priority Ordering**
   - **Validates: Requirements 1.3**
 
-- [ ] 2. Integrate queue into OpenAI Service
+- [x] 2. Integrate queue into OpenAI Service
   - Modify api/src/services/openaiService.ts to import openaiRequestQueue
   - Wrap chatCompletion() calls with queue.enqueue()
   - Wrap generateEmbedding() calls with queue.enqueue()
@@ -47,7 +47,7 @@ This plan implements five critical optimizations to achieve 10x improvement in c
   - **Property 6: Retry with Exponential Backoff**
   - **Validates: Requirements 1.6**
 
-- [ ] 3. Checkpoint - Verify queue integration
+- [x] 3. Checkpoint - Verify queue integration
   - Run existing tests to ensure no regressions
   - Test queue stats endpoint (size, pending)
   - Ensure all tests pass, ask the user if questions arise

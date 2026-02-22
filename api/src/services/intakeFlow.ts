@@ -1,3 +1,5 @@
+import { GeographyMapper, type NominationScope } from '../utils/geographyMapper';
+
 export type IntakeField =
   | 'user_name'
   | 'user_email'
@@ -6,6 +8,7 @@ export type IntakeField =
   | 'gender_programs_opt_in'
   | 'recognition_scope'
   | 'geography'
+  | 'nomination_scope'
   | 'description'
   | 'achievement_impact'
   | 'achievement_innovation'
@@ -18,6 +21,9 @@ function norm(s: string): string {
 /**
  * Append/store the user's raw answer into the pending field.
  * No validation/logic here by design; validation is handled by the LLM planning layer.
+ * 
+ * Special handling:
+ * - geography: Maps user input to database geography values (e.g., "India" → "Asia-Pacific")
  */
 export function applyAnswer(params: {
   pendingField: IntakeField;
@@ -30,6 +36,13 @@ export function applyAnswer(params: {
 
   if (!raw) return { updatedContext: ctx, accepted: false, error: 'empty' };
 
-  ctx[pendingField] = raw.substring(0, 1200);
+  // Special handling for geography field - store raw value
+  // Mapping will be done when generating recommendations using both geography and nomination_scope
+  if (pendingField === 'geography' || pendingField === 'nomination_scope') {
+    ctx[pendingField] = raw.substring(0, 1200);
+  } else {
+    ctx[pendingField] = raw.substring(0, 1200);
+  }
+  
   return { updatedContext: ctx, accepted: true };
 }

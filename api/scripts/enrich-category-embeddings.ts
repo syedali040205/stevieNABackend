@@ -1,13 +1,24 @@
 /**
- * Script to enrich category embeddings with contextual prefixes (Anthropic technique)
+ * Script to enrich category embeddings with contextual prefixes (Anthropic's Contextual Embeddings technique)
+ * 
+ * Reference: https://www.anthropic.com/news/contextual-retrieval
+ * 
+ * Anthropic's Contextual Retrieval technique improves RAG retrieval accuracy by 67% when combined with reranking.
+ * The key insight: Add context that situates each chunk within its broader document context BEFORE embedding.
+ * 
+ * For Stevie Award categories:
+ * - Each category is a complete "document" (not a chunk of a larger document)
+ * - We add context that situates the category within the Stevie Awards ecosystem
+ * - Format: "This award category is from [program] recognizing [type] for [eligible orgs]. [Category details]"
  * 
  * This script:
- * 1. Fetches all categories from the database
- * 2. Generates contextual prefix for each category using LLM
- * 3. Re-embeds categories with enriched text
- * 4. Updates category_embeddings table with new embeddings
+ * 1. Fetches all 1348 categories from Supabase (handles pagination for 1000 row limit)
+ * 2. Generates contextual prefix for each category using Claude's prompt
+ * 3. Formats enriched text: [Contextual Prefix] + [Focus Areas] + [Category Name] + [Description] + [Metadata]
+ * 4. Generates embeddings for enriched text
+ * 5. Stores embeddings in category_embeddings table
  * 
- * Expected improvement: 67% reduction in retrieval failures (Anthropic benchmark)
+ * Expected improvement: 35-49% reduction in retrieval failures (Anthropic benchmark)
  * 
  * Usage:
  *   npx tsx --env-file=.env scripts/enrich-category-embeddings.ts
@@ -33,18 +44,39 @@ interface Category {
 }
 
 /**
- * Generate contextual prefix for a category using LLM.
- * Format: "This category is for [context]. [original description]"
+ * Generate contextual prefix using Anthropic's technique.
+ * 
+ * Anthropic's approach: "This chunk is from [document context]. [original content]"
+ * For Stevie categories: "This award category is from [program] recognizing [type] for [eligible orgs]."
+ * 
+ * Key insight: Add context that situates the category within the Stevie Awards ecosystem
+ * to improve semantic retrieval accuracy.
  */
 async function generateContextualPrefix(category: Category): Promise<string> {
-  const systemPrompt = `You are an expert at the Stevie Awards. Given a category's metadata, generate a brief contextual prefix (1-2 sentences) that will help with semantic search.
+  // Detect if this is a social impact / humanitarian category
+  const categoryText = `${category.category_name} ${category.description} ${category.achievement_focus.join(' ')}`.toLowerCase();
+  const socialImpactKeywords = [
+    'social', 'humanitarian', 'community', 'charitable', 'responsibility', 
+    'healthcare', 'nonprofit', 'non-profit', 'cause', 'impact', 'csr', 
+    'engagement', 'disadvantaged', 'refugee', 'activist', 'entrepreneur',
+    'health', 'medical', 'hospital', 'patient', 'care', 'wellness'
+  ];
+  const isSocialImpact = socialImpactKeywords.some(keyword => categoryText.includes(keyword));
+
+  // Use Anthropic's prompt structure: situate this category within the Stevie Awards context
+  const systemPrompt = `You are generating contextual prefixes for Stevie Award categories to improve semantic search retrieval (Anthropic's Contextual Embeddings technique).
+
+Given a category's metadata, generate a SHORT contextual prefix that situates this category within the Stevie Awards ecosystem.
+
+Format: "This award category is from the [Program Name] program, recognizing [achievement type] for [eligible organizations]."
 
 Rules:
-- Start with "This category is for" or "This award recognizes"
-- Include: program name, focus areas, eligible organization types, nomination subject type
-- Be concise: 20-40 words maximum
+- Start with "This award category is from the"
+- Include program name, achievement focus, and eligible org types
+- ${isSocialImpact ? 'CRITICAL: This is a SOCIAL IMPACT/HUMANITARIAN category. Emphasize: social good, community impact, humanitarian initiatives, healthcare access, charitable work, helping people, making a difference in communities' : 'Focus on business excellence, innovation, and professional achievement'}
+- Keep it concise: 30-50 words maximum
 - Use formal award language
-- Output ONLY the prefix, no markdown, no labels
+- Output ONLY the prefix, no markdown, no extra text
 
 Example:
 Category: Best New Product - Technology
@@ -53,14 +85,15 @@ Focus: Innovation, Technology
 Org Types: for-profit, non-profit
 Subject: product
 
-Output: "This category is for innovative technology products from the American Business Awards program. Eligible for both for-profit and non-profit organizations nominating a product."`;
+Output: "This award category is from the American Business Awards program, recognizing innovative technology products for both for-profit and non-profit organizations."`;
 
   const userPrompt = `Generate contextual prefix for:
 Category: ${category.category_name}
 Program: ${category.program_name}
 Focus: ${category.achievement_focus.join(', ')}
 Org Types: ${category.applicable_org_types.join(', ')}
-Subject: ${category.nomination_subject_type}`;
+Subject: ${category.nomination_subject_type}
+${isSocialImpact ? '\n⚠️ SOCIAL IMPACT CATEGORY - Emphasize humanitarian/community/healthcare/charitable aspects in the prefix' : ''}`;
 
   try {
     const prefix = await openaiService.chatCompletion({
@@ -69,7 +102,7 @@ Subject: ${category.nomination_subject_type}`;
         { role: 'user', content: userPrompt },
       ],
       model: 'gpt-4o-mini',
-      maxTokens: 100,
+      maxTokens: 120,
       temperature: 0.3,
     });
 
@@ -79,8 +112,16 @@ Subject: ${category.nomination_subject_type}`;
       category_id: category.id,
       error: error.message,
     });
-    // Fallback to template-based prefix
-    return `This category is for ${category.achievement_focus.join(', ').toLowerCase()} achievements from the ${category.program_name} program. Eligible for ${category.applicable_org_types.join(', ')} organizations nominating a ${category.nomination_subject_type}.`;
+    
+    // Fallback to template-based prefix following Anthropic's format
+    const orgTypes = category.applicable_org_types.join(', ');
+    const focus = category.achievement_focus.join(', ').toLowerCase();
+    
+    if (isSocialImpact) {
+      return `This award category is from the ${category.program_name} program, recognizing social impact and humanitarian achievements in ${focus} for ${orgTypes} organizations making a difference in communities.`;
+    }
+    
+    return `This award category is from the ${category.program_name} program, recognizing ${focus} achievements for ${orgTypes} organizations.`;
   }
 }
 
@@ -131,7 +172,13 @@ async function enrichCategoryEmbeddings() {
   while (hasMore) {
     const { data, error } = await supabase
       .from('stevie_categories')
-      .select('*')
+      .select(`
+        *,
+        stevie_programs!inner (
+          program_name,
+          program_code
+        )
+      `)
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error) {
@@ -140,7 +187,14 @@ async function enrichCategoryEmbeddings() {
     }
 
     if (data && data.length > 0) {
-      allCategories = allCategories.concat(data);
+      // Flatten the joined data
+      const flattenedData = data.map((cat: any) => ({
+        ...cat,
+        program_name: cat.stevie_programs?.program_name || 'Unknown Program',
+        program_code: cat.stevie_programs?.program_code || 'UNKNOWN',
+      }));
+      
+      allCategories = allCategories.concat(flattenedData);
       console.log(`  Fetched page ${page + 1}: ${data.length} categories`);
       page++;
       hasMore = data.length === pageSize;

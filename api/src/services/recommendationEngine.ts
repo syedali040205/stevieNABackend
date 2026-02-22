@@ -2,10 +2,12 @@ import { sqlFilterEngine, SQLFilterEngine } from './sqlFilterEngine';
 import { embeddingManager, EmbeddingManager } from './embeddingManager';
 import { explanationGenerator } from './explanationGenerator';
 import { getSupabaseClient } from '../config/supabase';
+import { GeographyMapper } from '../utils/geographyMapper';
 import logger from '../utils/logger';
 
 interface UserContext {
   geography?: string;
+  nomination_scope?: string;
   organization_name?: string;
   job_title?: string;
   org_type?: string;
@@ -133,49 +135,41 @@ export class RecommendationEngine {
         dimension: userEmbedding.length,
       });
 
+      // Step 3.5: Intent detection DISABLED (was causing issues)
+      const categoryTypes = undefined;
+      
+      logger.info('intent_detection_complete', {
+        category_types: 'all',
+        note: 'Intent filtering DISABLED - reverted to working state',
+      });
+
       // Step 4: Perform vector search with contextual embeddings
       logger.info('step_3_similarity_search', {
         search_type: 'vector',
       });
       
-      // Map nomination_subject to match database values
-      // Database has: 'company', 'product' (not 'individual', 'team', 'organization')
-      let dbNominationSubject = context.nomination_subject;
-      if (context.nomination_subject === 'individual' || context.nomination_subject === 'team') {
-        // Individual/team nominations can match product or company categories
-        dbNominationSubject = 'product'; // Default to product for innovation/tech achievements
-        logger.info('mapped_nomination_subject', { 
-          from: context.nomination_subject, 
-          to: dbNominationSubject 
-        });
-      } else if (context.nomination_subject === 'organization') {
-        dbNominationSubject = 'company';
-        logger.info('mapped_nomination_subject', { 
-          from: context.nomination_subject, 
-          to: dbNominationSubject 
-        });
-      }
-      
-      // Geography filter - pass the geography value to database for filtering
-      // Database has: USA, Global, Asia, Pacific, Middle East, North Africa
-      const dbGeography = context.geography || undefined;
+      // Geography filter - single geography (working version before migration 009)
+      const userLocation = context.geography;
+      const dbGeography = userLocation 
+        ? GeographyMapper.mapGeography(userLocation, 'regional')[0] // Just use first geography
+        : undefined;
       
       logger.info('search_parameters', {
-        geography: dbGeography || 'all',
-        nomination_subject: dbNominationSubject,
+        user_location: userLocation || 'not specified',
+        mapped_geography: dbGeography || 'all',
         limit: limit,
-        note: 'Searching across ALL programs with boosting for Technology Excellence'
+        note: 'REVERTED TO WORKING STATE - pure semantic search with geography filter only'
       });
       
-      // Pure vector search with contextual embeddings
+      // Pure vector search (working version from migration 002)
       const similarityResults = await this.embeddingMgr.performSimilaritySearch(
         userEmbedding,
-        dbGeography, // Pass undefined for non-USA to skip geography filter
-        dbNominationSubject, // Pass mapped nomination subject
+        dbGeography ? [dbGeography] : undefined, // Single geography
+        null, // nomination_subject - not used
         limit,
-        context.org_type, // Pass org_type for metadata filtering
-        context.achievement_focus, // Pass achievement_focus for metadata filtering
-        context.gender // Pass gender for metadata filtering (e.g., Women in Business awards)
+        null, // org_type - not used  
+        context.achievement_focus, // Used for keyword boost scoring
+        context.gender // Pass gender for metadata filtering
       );
 
       logger.info('similarity_search_complete', {

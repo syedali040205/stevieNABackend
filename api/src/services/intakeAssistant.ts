@@ -17,6 +17,7 @@ const INTAKE_FIELDS: IntakeField[] = [
   'gender_programs_opt_in',
   'recognition_scope',
   'geography',
+  'nomination_scope',
   'description',
   'achievement_impact',
   'achievement_innovation',
@@ -39,6 +40,8 @@ Look at what you already know and what the user just said. Extract any info and 
 REQUIRED info (collect these before recommendations):
 - user_name
 - user_email
+- geography (where they're from - helps filter relevant awards)
+- nomination_scope (regional|global|both - where they want to nominate)
 - nomination_subject (individual|team|organization|product)
 - org_type (for_profit|non_profit)
 - gender_programs_opt_in (true|false|"__skipped__")
@@ -56,6 +59,8 @@ ${INTAKE_FIELDS.join(', ')}
 HOW TO ASK NATURALLY (vary your phrasing, reference context):
 - user_name: "What's your name?" / "And you are?" / "Who should I put down for this?"
 - user_email: "What's your email?" / "And your email address?" / "Email?"
+- geography: "Where are you from?" / "What's your location?" / "Which country/region are you in?" / "Where are you based?"
+- nomination_scope: "Would you like to nominate for regional awards, international awards, or both?" / "Regional or global awards?" / "Just your region or worldwide?"
 - nomination_subject: "Got it! Are we nominating an individual, a team, an organization, or a product?" / "Is this for a person, team, company, or product?"
 - org_type: "Is this a for-profit or non-profit?" / "For-profit company or non-profit organization?" / "Profit or non-profit?"
 - gender_programs_opt_in: "Interested in women-focused awards too?" / "Would you like to be considered for women's leadership categories? (yes/no/skip)" / "Want to include women-specific awards?"
@@ -68,6 +73,7 @@ HOW TO ASK NATURALLY (vary your phrasing, reference context):
 CONTEXT-AWARE EXAMPLES:
 - If they mention "team" → "Great! What's your name?"
 - If they give name → "Thanks [name]! What's your email?"
+- If they give email → "Perfect! Where are you from? This helps us find the most relevant awards for you."
 - If they describe achievement → "That sounds impressive! What kind of impact did it have?"
 - After 1 follow-up → "Perfect! Let me find the best categories for you."
 
@@ -84,7 +90,7 @@ User just said:
 Return ONLY valid JSON:
 {
   "updates": {"field": "value"},
-  "next_field": "user_name" | "user_email" | "nomination_subject" | "org_type" | "gender_programs_opt_in" | "recognition_scope" | "geography" | "description" | "achievement_impact" | "achievement_innovation" | "achievement_challenges" | null,
+  "next_field": "user_name" | "user_email" | "nomination_subject" | "org_type" | "gender_programs_opt_in" | "recognition_scope" | "geography" | "nomination_scope" | "description" | "achievement_impact" | "achievement_innovation" | "achievement_challenges" | null,
   "next_question": "...",
   "ready_for_recommendations": true|false
 }
