@@ -222,8 +222,9 @@ export class StevieAwardsCrawler {
     let currentLength = 0;
     
     // Get paragraphs
-    $('p').each((_, el) => {
-      if (currentLength >= maxContentLength) return false; // Stop iteration
+    const paragraphs = $('p').toArray();
+    for (const el of paragraphs) {
+      if (currentLength >= maxContentLength) break;
       
       const text = $(el).text().trim();
       if (text && text.length > 20) {
@@ -231,12 +232,13 @@ export class StevieAwardsCrawler {
         contentParts.push(normalized);
         currentLength += normalized.length;
       }
-    });
+    }
 
     // Get list items if we still have space
     if (currentLength < maxContentLength) {
-      $('li').each((_, el) => {
-        if (currentLength >= maxContentLength) return false; // Stop iteration
+      const listItems = $('li').toArray();
+      for (const el of listItems) {
+        if (currentLength >= maxContentLength) break;
         
         const text = $(el).text().trim();
         if (text && text.length > 10) {
@@ -244,7 +246,7 @@ export class StevieAwardsCrawler {
           contentParts.push(normalized);
           currentLength += normalized.length;
         }
-      });
+      }
     }
 
     return contentParts.join('\n\n');
