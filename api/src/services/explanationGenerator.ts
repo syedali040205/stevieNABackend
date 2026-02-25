@@ -5,7 +5,6 @@ import logger from '../utils/logger';
  * Explanation Generator Service
  * 
  * Generates match explanations for category recommendations using OpenAI.
- * Replaces the Python AI service explanation generation.
  */
 
 const SYSTEM_PROMPT = `You are an expert at explaining why Stevie Award categories match a nomination.

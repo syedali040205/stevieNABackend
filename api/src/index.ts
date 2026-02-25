@@ -35,7 +35,6 @@ console.log("Environment check:", {
   SUPABASE_URL: process.env.SUPABASE_URL ? "Set" : "Missing",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ? "Set" : "Missing",
   INTERNAL_API_KEY: process.env.INTERNAL_API_KEY ? "Set" : "Missing",
-  AI_SERVICE_URL: process.env.AI_SERVICE_URL ? "Set" : "Missing",
 });
 
 // Now import everything else

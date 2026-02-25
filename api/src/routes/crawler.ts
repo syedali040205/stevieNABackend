@@ -10,7 +10,7 @@ const router = Router();
  * @route POST /api/crawler/crawl
  * @access Internal (requires internal API key)
  */
-router.post('/crawl', internalAuth, async (req: Request, res: Response) => {
+router.post('/crawl', internalAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const {
       url,
@@ -29,47 +29,52 @@ router.post('/crawl', internalAuth, async (req: Request, res: Response) => {
 
     // Validation
     if (!url) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'BadRequest',
         message: 'URL is required',
       });
+      return;
     }
 
     // Validate URL format
     try {
       new URL(url);
     } catch (error) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'BadRequest',
         message: 'Invalid URL format',
       });
+      return;
     }
 
     // Validate depth and breadth
     if (maxDepth < 1 || maxDepth > 5) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'BadRequest',
         message: 'maxDepth must be between 1 and 5',
       });
+      return;
     }
 
     if (maxBreadth < 1 || maxBreadth > 200) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'BadRequest',
         message: 'maxBreadth must be between 1 and 200',
       });
+      return;
     }
 
     if (limit < 1 || limit > 1000) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'BadRequest',
         message: 'limit must be between 1 and 1000',
       });
+      return;
     }
 
     logger.info('crawler_request_received', {
@@ -120,7 +125,7 @@ router.post('/crawl', internalAuth, async (req: Request, res: Response) => {
  * @route GET /api/crawler/health
  * @access Public
  */
-router.get('/health', async (_req: Request, res: Response) => {
+router.get('/health', async (_req: Request, res: Response): Promise<void> => {
   try {
     const isHealthy = await tavilyCrawler.healthCheck();
 

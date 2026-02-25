@@ -206,8 +206,8 @@ Rules:
   }
 
   /**
-   * Call Python AI Service to generate embedding for text.
-   * Python handles the OpenAI API call.
+   * Generate embedding for text using OpenAI API.
+   * Handles the OpenAI API call directly in Node.js.
    */
   async generateEmbedding(text: string): Promise<number[]> {
     logger.info("generating_embedding", {
