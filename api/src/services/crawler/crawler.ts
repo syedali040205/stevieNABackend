@@ -67,10 +67,10 @@ export class StevieAwardsCrawler {
 
   constructor(config: CrawlerConfig = {}) {
     this.config = {
-      maxRequestsPerCrawl: config.maxRequestsPerCrawl ?? 50,
-      maxConcurrency: config.maxConcurrency ?? 3,
+      maxRequestsPerCrawl: config.maxRequestsPerCrawl ?? 10,
+      maxConcurrency: config.maxConcurrency ?? 2,
       requestDelay: config.requestDelay ?? 1000,
-      maxDepth: config.maxDepth ?? 2,
+      maxDepth: config.maxDepth ?? 1,
       userAgent: config.userAgent ?? 'StevieAwardsSearchBot/1.0 (Award Search Assistant)',
     };
 
@@ -218,22 +218,34 @@ export class StevieAwardsCrawler {
    */
   private extractContent($: CheerioAPI): string {
     const contentParts: string[] = [];
+    const maxContentLength = 5000; // Limit total content to reduce memory usage
+    let currentLength = 0;
     
     // Get paragraphs
     $('p').each((_, el) => {
+      if (currentLength >= maxContentLength) return false; // Stop iteration
+      
       const text = $(el).text().trim();
       if (text && text.length > 20) {
-        contentParts.push(this.normalizeText(text));
+        const normalized = this.normalizeText(text);
+        contentParts.push(normalized);
+        currentLength += normalized.length;
       }
     });
 
-    // Get list items
-    $('li').each((_, el) => {
-      const text = $(el).text().trim();
-      if (text && text.length > 10) {
-        contentParts.push(this.normalizeText(text));
-      }
-    });
+    // Get list items if we still have space
+    if (currentLength < maxContentLength) {
+      $('li').each((_, el) => {
+        if (currentLength >= maxContentLength) return false; // Stop iteration
+        
+        const text = $(el).text().trim();
+        if (text && text.length > 10) {
+          const normalized = this.normalizeText(text);
+          contentParts.push(normalized);
+          currentLength += normalized.length;
+        }
+      });
+    }
 
     return contentParts.join('\n\n');
   }

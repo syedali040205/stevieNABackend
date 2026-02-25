@@ -153,13 +153,16 @@ Information from stevieawards.com:
 ${crawledData}
 
 Instructions:
-- Provide a comprehensive, well-structured answer
+- Provide a comprehensive, well-structured answer in natural, flowing language
 - Use ONLY information from the provided sources
-- If information is incomplete, explicitly state what is missing
-- For complex questions, organize your answer with clear sections
+- Write in clear paragraphs with proper sentence structure
+- DO NOT include citation markers like [1], [2] in your answer - citations will be added automatically
+- If information is incomplete, explicitly state what is missing at the end
+- For complex questions, organize your answer with clear sections using headings
 - Be factual and precise
 - Combine information from multiple sources when relevant
 - Do not make assumptions or add information not present in the sources
+- Write in a professional, user-friendly tone
 
 Answer:`;
   }

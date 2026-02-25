@@ -1,10 +1,13 @@
 # 🚀 Deployment Summary - Award Search & Profile Fix
 
-## Status: ✅ DEPLOYED TO PRODUCTION
+## Status: ✅ DEPLOYED TO PRODUCTION (FIXED)
 
-**Commit**: `63ad3a1`  
+**Commit**: `68ad6f4`  
 **Branch**: `main`  
 **Date**: February 25, 2026
+
+**Previous Issue**: Build failed due to cross-project imports  
+**Fix**: Moved crawler into api project structure
 
 ---
 
