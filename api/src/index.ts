@@ -44,7 +44,6 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import { getSupabaseClient, closeSupabaseConnection } from "./config/supabase";
-import { cacheManager } from "./services/cacheManager";
 import logger from "./utils/logger";
 import { correlationIdMiddleware } from "./middleware/correlationId";
 import { requestLoggerMiddleware } from "./middleware/requestLogger";
@@ -56,11 +55,6 @@ import metricsRouter from "./routes/metrics";
 import usersRouter from "./routes/users";
 import unifiedChatbotRouter from "./routes/unified-chatbot";
 import documentsRouter from "./routes/documents";
-import diagnosticRouter from "./routes/diagnostic";
-import internalRouter from "./routes/internal";
-import ragDiagnosticRouter from "./routes/rag-diagnostic";
-import redisHealthRouter from "./routes/redis-health";
-import recommendationsRouter from "./routes/recommendations";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -157,15 +151,10 @@ try {
 
 // Routes
 app.use("/api/health", healthRouter);
-app.use("/api/internal", internalRouter);
 app.use("/metrics", metricsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/documents", documentsRouter);
-app.use("/api/diagnostic", diagnosticRouter);
-app.use("/api/rag-diagnostic", ragDiagnosticRouter);
-app.use("/api", redisHealthRouter);
 app.use("/api", unifiedChatbotRouter);
-app.use("/api/recommendations", recommendationsRouter);
 
 // Root endpoint
 app.get("/", (_req, res) => {
@@ -200,16 +189,10 @@ const server = app.listen(PORT, () => {
 const gracefulShutdown = (signal: string) => {
   logger.info(`${signal} received. Starting graceful shutdown...`);
 
-  server.close(async () => {
+  server.close(() => {
     logger.info("HTTP server closed");
 
-    try {
-      await cacheManager.close();
-      logger.info("Redis connection closed");
-    } catch (e) {
-      logger.warn("Redis close error", { error: (e as Error).message });
-    }
-
+    // Close Supabase connection
     closeSupabaseConnection();
     logger.info("Database connections closed");
 

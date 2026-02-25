@@ -31,6 +31,7 @@ async function checkAIServiceHealth(): Promise<boolean> {
  * Liveness probe (industry standard: process is up).
  * No dependencies; use for orchestrator liveness.
  * @route GET /api/health/live
+ * @route HEAD /api/health/live
  */
 router.get("/live", (_req: Request, res: Response) => {
   res.status(200).json({
@@ -41,10 +42,21 @@ router.get("/live", (_req: Request, res: Response) => {
   });
 });
 
+router.head("/live", (req: Request, res: Response) => {
+  logger.info("health_check_head_request", {
+    endpoint: "/api/health/live",
+    timestamp: new Date().toISOString(),
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+  });
+  res.sendStatus(200);
+});
+
 /**
  * Readiness probe (industry standard: can accept traffic).
  * Checks Redis and database; return 503 if either is down so LB stops sending traffic.
  * @route GET /api/health/ready
+ * @route HEAD /api/health/ready
  */
 router.get("/ready", async (_req: Request, res: Response) => {
   try {
@@ -78,11 +90,34 @@ router.get("/ready", async (_req: Request, res: Response) => {
   }
 });
 
+router.head("/ready", async (req: Request, res: Response) => {
+  logger.info("health_check_head_request", {
+    endpoint: "/api/health/ready",
+    timestamp: new Date().toISOString(),
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+  });
+  
+  try {
+    const [isRedisHealthy, isDatabaseHealthy] = await Promise.all([
+      cacheManager.healthCheck(),
+      checkDatabaseHealth(),
+    ]);
+
+    const ready = isRedisHealthy && isDatabaseHealthy;
+    res.sendStatus(ready ? 200 : 503);
+  } catch (error: any) {
+    logger.error("readiness_check_head_error", { error: error.message });
+    res.sendStatus(503);
+  }
+});
+
 /**
  * Health check endpoint (full detail, backward compatible)
  * Verifies database connectivity, session storage, and AI service status
  *
  * @route GET /api/health
+ * @route HEAD /api/health
  * @returns {object} 200 - Service health status
  * @returns {object} 503 - Service unhealthy
  */
@@ -140,6 +175,29 @@ router.get("/", async (_req: Request, res: Response) => {
       error: "Health check failed",
       timestamp: new Date().toISOString(),
     });
+  }
+});
+
+router.head("/", async (req: Request, res: Response) => {
+  logger.info("health_check_head_request", {
+    endpoint: "/api/health",
+    timestamp: new Date().toISOString(),
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+  });
+  
+  try {
+    const [isDatabaseHealthy, isSessionStorageHealthy] = await Promise.all([
+      checkDatabaseHealth(),
+      sessionManager.checkHealth(),
+    ]);
+
+    // Return 503 only if critical services are down
+    const criticalHealthy = isDatabaseHealthy && isSessionStorageHealthy;
+    res.sendStatus(criticalHealthy ? 200 : 503);
+  } catch (error: any) {
+    logger.error("health_check_head_error", { error: error.message });
+    res.sendStatus(503);
   }
 });
 
