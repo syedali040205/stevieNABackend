@@ -114,6 +114,41 @@ export const openaiTokensTotal = new Counter({
   registers: [register],
 });
 
+// Award Search metrics
+export const awardSearchRequestsTotal = new Counter({
+  name: 'award_search_requests_total',
+  help: 'Total number of award search requests',
+  labelNames: ['status', 'cache_hit'],
+  registers: [register],
+});
+
+export const awardSearchResponseTime = new Histogram({
+  name: 'award_search_response_time_seconds',
+  help: 'Response time for award search requests',
+  labelNames: ['cache_hit'],
+  buckets: [1, 3, 5, 7, 10, 15, 20, 30],
+  registers: [register],
+});
+
+export const awardSearchCrawlRequests = new Counter({
+  name: 'award_search_crawl_requests_total',
+  help: 'Total number of crawl requests',
+  labelNames: ['status'],
+  registers: [register],
+});
+
+export const awardSearchCacheHitRate = new Gauge({
+  name: 'award_search_cache_hit_rate',
+  help: 'Cache hit rate for award search',
+  registers: [register],
+});
+
+export const awardSearchQueueDepth = new Gauge({
+  name: 'award_search_queue_depth',
+  help: 'Current depth of the award search queue',
+  registers: [register],
+});
+
 // Collect default metrics (CPU, memory, etc.)
 import { collectDefaultMetrics } from 'prom-client';
 collectDefaultMetrics({ register });

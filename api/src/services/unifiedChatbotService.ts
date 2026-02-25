@@ -11,6 +11,7 @@ import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
 import { intakeAssistant } from './intakeAssistant';
 import { applyAnswer, type IntakeField } from './intakeFlow';
+import { awardSearchService } from './awardSearchService';
 import crypto from 'crypto';
 
 export class UnifiedChatbotService {
@@ -190,19 +191,91 @@ export class UnifiedChatbotService {
         const extractedFields = await fieldExtractor.extractFields({ message, userContext, conversationHistory, signal });
         if (extractedFields && Object.keys(extractedFields).length > 0) userContext = { ...userContext, ...extractedFields };
 
+        // First, try KB search
         const kbArticles = await this.searchKB(message, signal);
 
+        // Check if KB articles are sufficient (have good similarity scores)
+        const hasGoodKBResults = kbArticles.length > 0 && kbArticles[0].similarity > 0.7;
+
         let assistantResponse = '';
-        for await (const chunk of conversationManager.generateResponseStream({
-          message,
-          context,
-          conversationHistory,
-          userContext,
-          kbArticles,
-          signal,
-        })) {
-          assistantResponse += chunk;
-          yield { type: 'chunk', content: chunk };
+        let usedAwardSearch = false;
+
+        if (!hasGoodKBResults) {
+          // KB didn't have good results, try Award Search crawler
+          logger.info('qa_fallback_to_award_search', { 
+            message: message.substring(0, 100),
+            kb_results: kbArticles.length,
+            top_similarity: kbArticles[0]?.similarity || 0
+          });
+
+          try {
+            const awardSearchResult = await awardSearchService.search(message);
+            
+            if (awardSearchResult.success) {
+              // Use the crawler's answer
+              assistantResponse = awardSearchResult.answer;
+              usedAwardSearch = true;
+              
+              logger.info('qa_award_search_success', {
+                cache_hit: awardSearchResult.metadata.cacheHit,
+                response_time: awardSearchResult.metadata.responseTimeMs,
+                sources_used: awardSearchResult.metadata.sourcesUsed
+              });
+
+              yield { type: 'chunk', content: assistantResponse };
+            } else {
+              // Award search failed, fall back to KB with warning
+              logger.warn('qa_award_search_failed', { 
+                error: awardSearchResult.error?.message 
+              });
+              
+              // Generate response from KB articles even if similarity is low
+              for await (const chunk of conversationManager.generateResponseStream({
+                message,
+                context,
+                conversationHistory,
+                userContext,
+                kbArticles,
+                signal,
+              })) {
+                assistantResponse += chunk;
+                yield { type: 'chunk', content: chunk };
+              }
+            }
+          } catch (error: any) {
+            // Award search threw an error, fall back to KB
+            logger.error('qa_award_search_error', { error: error.message });
+            
+            for await (const chunk of conversationManager.generateResponseStream({
+              message,
+              context,
+              conversationHistory,
+              userContext,
+              kbArticles,
+              signal,
+            })) {
+              assistantResponse += chunk;
+              yield { type: 'chunk', content: chunk };
+            }
+          }
+        } else {
+          // KB has good results, use them
+          logger.info('qa_using_kb_articles', { 
+            kb_results: kbArticles.length,
+            top_similarity: kbArticles[0]?.similarity 
+          });
+
+          for await (const chunk of conversationManager.generateResponseStream({
+            message,
+            context,
+            conversationHistory,
+            userContext,
+            kbArticles,
+            signal,
+          })) {
+            assistantResponse += chunk;
+            yield { type: 'chunk', content: chunk };
+          }
         }
 
         const fullHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [
@@ -220,7 +293,11 @@ export class UnifiedChatbotService {
         );
 
         this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: assistantResponse || '(No response)' });
-        logger.info('unified_chat_complete');
+        
+        logger.info('unified_chat_complete', { 
+          used_award_search: usedAwardSearch,
+          kb_results: kbArticles.length 
+        });
         return;
       }
 
@@ -260,10 +337,32 @@ export class UnifiedChatbotService {
 
       if (pendingField) {
         const applied = applyAnswer({ pendingField, message, userContext });
-        if (applied.accepted) userContext = applied.updatedContext;
+        if (applied.accepted) {
+          userContext = applied.updatedContext;
+          logger.info('applied_pending_field_answer', {
+            field: pendingField,
+            value_preview: String((userContext as any)[pendingField]).substring(0, 50),
+            accepted: true
+          });
+        } else {
+          logger.warn('pending_field_answer_rejected', {
+            field: pendingField,
+            error: applied.error
+          });
+        }
+      } else {
+        logger.info('no_pending_field_to_apply', { message_preview: message.substring(0, 50) });
       }
 
       const plan = await intakeAssistant.planNext({ userContext, message, signal });
+
+      // Log what the LLM extracted
+      logger.info('intake_assistant_plan_result', {
+        updates_count: Object.keys(plan.updates || {}).length,
+        updates: plan.updates,
+        next_field: plan.next_field,
+        ready: plan.ready_for_recommendations
+      });
 
       // Merge extracted updates (LLM) into userContext.
       if (plan.updates && Object.keys(plan.updates).length > 0) {
@@ -324,6 +423,14 @@ export class UnifiedChatbotService {
         fullHistory.length > this.MAX_CONVERSATION_HISTORY ? fullHistory.slice(-this.MAX_CONVERSATION_HISTORY) : fullHistory;
 
       pendingField = plan.ready_for_recommendations ? null : effectiveNextField;
+
+      logger.info('updating_session_with_context', {
+        session_id: sessionId,
+        user_context_keys: Object.keys(userContext),
+        user_name: userContext.user_name ? 'SET' : 'NOT_SET',
+        user_email: userContext.user_email ? 'SET' : 'NOT_SET',
+        pending_field: pendingField
+      });
 
       await this.sessionManager.updateSession(
         sessionId,
