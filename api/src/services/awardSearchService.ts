@@ -1,8 +1,9 @@
-import { QueryPlanner } from '../../../crawler/src/queryPlanner';
-import { StevieAwardsCrawler, CrawlResult } from '../../../crawler/src/crawler';
-import { AnswerSynthesizer } from '../../../crawler/src/synthesizer';
+import { QueryPlanner } from './crawler/queryPlanner';
+import { StevieAwardsCrawler, CrawlResult } from './crawler/crawler';
+import { AnswerSynthesizer } from './crawler/synthesizer';
 import { CitationSystem } from './citationSystem';
 import { awardSearchCacheManager } from './awardSearchCacheManager';
+import { openaiService } from './openaiService';
 import { getAwardSearchConfig } from '../config/awardSearch';
 import logger from '../utils/logger';
 import {
@@ -52,7 +53,7 @@ export class AwardSearchService {
   constructor() {
     this.queryPlanner = new QueryPlanner();
     this.crawler = new StevieAwardsCrawler();
-    this.synthesizer = new AnswerSynthesizer();
+    this.synthesizer = new AnswerSynthesizer(openaiService);
     this.citationSystem = new CitationSystem();
   }
 

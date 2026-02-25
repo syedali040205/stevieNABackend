@@ -1,4 +1,4 @@
-import type { CrawlResult } from '../../../crawler/src/crawler';
+import type { CrawlResult } from './crawler/crawler';
 
 /**
  * Citation information for a source

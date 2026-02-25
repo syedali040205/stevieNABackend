@@ -1,0 +1,9 @@
+{
+	"id": "Dd9Z5ixUqiqWOAr",
+	"json": "{\"id\":\"Dd9Z5ixUqiqWOAr\",\"url\":\"https://www.stevieawards.com/mena\",\"loadedUrl\":\"https://mena.stevieawards.com/\",\"uniqueKey\":\"https://www.stevieawards.com/mena\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{\"User-Agent\":\"StevieAwardsSearchBot/1.0 (Award Search Assistant)\"},\"userData\":{\"depth\":0,\"__crawlee\":{\"state\":4}},\"handledAt\":\"2026-02-25T16:46:37.426Z\"}",
+	"method": "GET",
+	"orderNo": null,
+	"retryCount": 0,
+	"uniqueKey": "https://www.stevieawards.com/mena",
+	"url": "https://www.stevieawards.com/mena"
+}
