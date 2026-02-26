@@ -59,6 +59,11 @@ export interface SessionData {
    * This prevents LLM-driven loops and ensures user answers are applied to the intended field.
    */
   pending_field?: IntakeField | null;
+  /**
+   * Track which fields have been asked to prevent loops.
+   * Array of field names that have been asked at least once.
+   */
+  asked_fields?: string[];
 }
 
 /**

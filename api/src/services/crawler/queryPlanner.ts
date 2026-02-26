@@ -6,6 +6,8 @@ import logger from '../../utils/logger';
 export interface QueryIntent {
   type: 'category' | 'eligibility' | 'pricing' | 'deadline' | 'process' | 'comparison' | 'general';
   subQuestions: string[];
+  detectedPrograms: string[];
+  suggestedUrls: string[];
 }
 
 export interface SearchPlan {
@@ -27,31 +29,27 @@ export class QueryPlanner {
   async planSearch(query: string): Promise<SearchPlan> {
     logger.info('query_planner_start', { query });
 
-    // Analyze intent using OpenAI
+    // Analyze intent using OpenAI - LLM determines everything
     const intent = await this.analyzeIntent(query);
     
-    // Extract keywords
-    const keywords = this.extractKeywords(query);
-    
-    // Generate target URLs based on intent and keywords
-    const targetUrls = this.generateTargetUrls(intent, keywords);
+    // Use LLM-suggested URLs
+    const targetUrls = intent.suggestedUrls;
     
     // Check cache for existing data (cache-first strategy)
     const cachedUrls = await this.checkCache(targetUrls);
     
     // Determine if comparison is required
-    const requiresComparison = intent.type === 'comparison' || 
-                               this.detectComparison(query);
+    const requiresComparison = intent.type === 'comparison';
     
-    // Extract entities for comparison
-    const entities = requiresComparison ? this.extractEntities(query, keywords) : [];
+    // Use detected programs as entities
+    const entities = intent.detectedPrograms;
     
     // Determine priority
     const priority = this.determinePriority(intent, cachedUrls.length, targetUrls.length);
 
     const plan: SearchPlan = {
       intent,
-      keywords,
+      keywords: intent.detectedPrograms,
       targetUrls,
       requiresComparison,
       entities,
@@ -61,7 +59,7 @@ export class QueryPlanner {
 
     logger.info('query_planner_complete', { 
       intentType: intent.type,
-      keywordCount: keywords.length,
+      programsDetected: intent.detectedPrograms,
       targetUrlCount: targetUrls.length,
       cachedUrlCount: cachedUrls.length,
       requiresComparison,
@@ -73,35 +71,43 @@ export class QueryPlanner {
 
   /**
    * Analyze query intent using OpenAI
-   * Detects query type, award programs, and decomposes multi-part questions
+   * LLM determines intent, programs, and starting URL for crawling
    */
   private async analyzeIntent(query: string): Promise<QueryIntent> {
-    const systemPrompt = `You are an expert at analyzing questions about Stevie Awards. 
-Analyze the user's query and determine:
-1. The primary intent type: category, eligibility, pricing, deadline, process, comparison, or general
-2. If the query contains multiple sub-questions, list them separately
+    const systemPrompt = `You are an expert at analyzing questions about Stevie Awards and determining the best starting page for web crawling.
 
-Known Stevie Awards programs:
-- American Business Awards (ABA)
-- International Business Awards (IBA)
-- Stevie Awards for Sales & Customer Service
-- Stevie Awards for Great Employers
-- Asia-Pacific Stevie Awards
-- Middle East & North Africa Stevie Awards (MENA)
-- Stevie Awards for Women in Business (SAWIB, WIB)
-- German Stevie Awards
-- Stevie Awards for Technology Excellence
+Known Stevie Awards programs and their base URLs:
+- American Business Awards (ABA): https://www.stevieawards.com/aba
+- International Business Awards (IBA): https://www.stevieawards.com/iba
+- Stevie Awards for Sales & Customer Service: https://www.stevieawards.com/sba
+- Stevie Awards for Great Employers: https://www.stevieawards.com/gsa
+- Asia-Pacific Stevie Awards: https://www.stevieawards.com/asia
+- Middle East & North Africa Stevie Awards (MENA): https://www.stevieawards.com/mena
+- Stevie Awards for Women in Business (SAWIB/WIB): https://www.stevieawards.com/women
+- German Stevie Awards: https://www.stevieawards.com/german
+- Stevie Awards for Technology Excellence (SATE): https://www.stevieawards.com/tech
+
+Main site: https://www.stevieawards.com
+
+Your task:
+1. Identify the intent type: category, eligibility, pricing, deadline, process, comparison, or general
+2. Detect which Stevie Awards program(s) the user is asking about
+3. Suggest 1-2 STARTING URLs where the crawler should begin
+   - The crawler will automatically discover and follow relevant links from these pages
+   - Choose pages that are likely to have links to the information needed
+   - For program-specific questions, suggest the main program page
+   - For general questions, suggest the main site
+4. Break down multi-part questions into sub-questions
 
 Respond in JSON format:
 {
   "type": "category|eligibility|pricing|deadline|process|comparison|general",
-  "subQuestions": ["question 1", "question 2", ...]
-}
+  "subQuestions": ["question 1", "question 2", ...],
+  "detectedPrograms": ["program name 1", "program name 2", ...],
+  "suggestedUrls": ["starting_url1", "starting_url2"]
+}`;
 
-If the query is a single question, subQuestions should contain just that question.
-If the query asks to compare things or find differences, use type "comparison".`;
-
-    const userPrompt = `Analyze this query: "${query}"`;
+    const userPrompt = `Analyze this query and suggest 1-2 starting URLs for crawling: "${query}"`;
 
     try {
       const response = await openaiService.chatCompletion({
@@ -111,7 +117,7 @@ If the query asks to compare things or find differences, use type "comparison".`
         ],
         model: 'gpt-4o-mini',
         temperature: 0.3,
-        maxTokens: 500,
+        maxTokens: 800,
         priority: QueuePriority.QA
       });
 
@@ -120,7 +126,9 @@ If the query asks to compare things or find differences, use type "comparison".`
       
       return {
         type: parsed.type || 'general',
-        subQuestions: parsed.subQuestions || [query]
+        subQuestions: parsed.subQuestions || [query],
+        detectedPrograms: parsed.detectedPrograms || [],
+        suggestedUrls: parsed.suggestedUrls || ['https://www.stevieawards.com']
       };
     } catch (error: any) {
       logger.error('query_planner_intent_analysis_error', { 
@@ -162,138 +170,15 @@ If the query asks to compare things or find differences, use type "comparison".`
     // Simple multi-question detection
     const subQuestions = query.split(/[?;]/).filter(q => q.trim().length > 0);
     
+    // Fallback URL
+    const suggestedUrls = ['https://www.stevieawards.com'];
+    
     return {
       type,
-      subQuestions: subQuestions.length > 0 ? subQuestions : [query]
+      subQuestions: subQuestions.length > 0 ? subQuestions : [query],
+      detectedPrograms: [],
+      suggestedUrls
     };
-  }
-
-  /**
-   * Extract keywords from query
-   * Identifies award programs, topics, and search terms
-   */
-  private extractKeywords(query: string): string[] {
-    const normalized = query.toLowerCase();
-    const keywords: string[] = [];
-
-    // Award program patterns - more flexible matching
-    const programPatterns = [
-      { pattern: /\b(aba|american business)\b/i, keyword: 'aba' },
-      { pattern: /\b(iba|international business)\b/i, keyword: 'iba' },
-      { pattern: /\b(sales|customer service|sba)\b/i, keyword: 'sba' },
-      { pattern: /\b(great employers|gsa)\b/i, keyword: 'gsa' },
-      { pattern: /\b(asia|apac|asia-pacific)\b/i, keyword: 'asia' },
-      { pattern: /\b(mena|middle east|north africa)\b/i, keyword: 'mena' },
-      { pattern: /\b(women|wib|sawib|women in business)\b/i, keyword: 'women' },
-      { pattern: /\b(german|germany)\b/i, keyword: 'german' },
-      { pattern: /\b(tech|technology)\b/i, keyword: 'tech' },
-    ];
-
-    programPatterns.forEach(({ pattern, keyword }) => {
-      if (pattern.test(query)) {
-        keywords.push(keyword);
-      }
-    });
-
-    // Extract topic keywords
-    const topics = [
-      'category', 'categories', 
-      'price', 'pricing', 'cost', 'fee', 'fees',
-      'eligibility', 'eligible', 'qualify', 'qualification',
-      'deadline', 'due date', 'submission',
-      'nomination', 'nominate', 'entry', 'enter',
-      'process', 'procedure', 'how to',
-      'award', 'awards', 'winner', 'winners', 'held', 'location', 'venue'
-    ];
-    
-    topics.forEach(topic => {
-      if (normalized.includes(topic)) {
-        keywords.push(topic);
-      }
-    });
-
-    // Remove duplicates
-    return [...new Set(keywords)];
-  }
-
-  /**
-   * Generate target URLs based on intent and keywords
-   * Creates URL patterns for crawling
-   */
-  private generateTargetUrls(intent: QueryIntent, keywords: string[]): string[] {
-    const urls: string[] = [];
-    const baseUrl = 'https://www.stevieawards.com';
-
-    // Map program keywords to URL paths
-    const programUrlMap: Record<string, string> = {
-      'aba': 'aba',
-      'iba': 'iba',
-      'sba': 'sba',
-      'gsa': 'gsa',
-      'asia': 'asia',
-      'mena': 'mena',
-      'women': 'women',
-      'german': 'german',
-      'tech': 'tech'
-    };
-
-    // Extract program keywords
-    const programs = keywords.filter(k => k in programUrlMap);
-
-    // If no specific program mentioned, add main site
-    if (programs.length === 0) {
-      urls.push(baseUrl);
-    }
-
-    // Generate URLs based on intent type
-    programs.forEach(program => {
-      const programPath = `${baseUrl}/${programUrlMap[program]}`;
-      
-      switch (intent.type) {
-        case 'category':
-          urls.push(`${programPath}/categories`);
-          urls.push(programPath);
-          break;
-          
-        case 'eligibility':
-          urls.push(`${programPath}/eligibility`);
-          urls.push(`${programPath}/entry-guidelines`);
-          urls.push(programPath);
-          break;
-          
-        case 'pricing':
-          urls.push(`${programPath}/entry-fees`);
-          urls.push(`${programPath}/pricing`);
-          urls.push(programPath);
-          break;
-          
-        case 'deadline':
-          urls.push(`${programPath}/deadlines`);
-          urls.push(`${programPath}/entry-deadlines`);
-          urls.push(programPath);
-          break;
-          
-        case 'process':
-          urls.push(`${programPath}/how-to-enter`);
-          urls.push(`${programPath}/entry-process`);
-          urls.push(programPath);
-          break;
-          
-        case 'comparison':
-          // For comparison, add main pages for each program
-          urls.push(programPath);
-          urls.push(`${programPath}/categories`);
-          break;
-          
-        case 'general':
-        default:
-          urls.push(programPath);
-          break;
-      }
-    });
-
-    // Remove duplicates
-    return [...new Set(urls)];
   }
 
   /**
@@ -324,57 +209,6 @@ If the query asks to compare things or find differences, use type "comparison".`
   }
 
   /**
-   * Detect if query requires comparison
-   */
-  private detectComparison(query: string): boolean {
-    const normalized = query.toLowerCase();
-    const comparisonKeywords = [
-      'compare', 'comparison', 'difference', 'differences',
-      'versus', 'vs', 'vs.', 'between',
-      'which is better', 'which one', 'what is the difference'
-    ];
-    
-    return comparisonKeywords.some(keyword => normalized.includes(keyword));
-  }
-
-  /**
-   * Extract entities for comparison
-   * Identifies award programs, categories, or other entities to compare
-   */
-  private extractEntities(query: string, keywords: string[]): string[] {
-    const entities: string[] = [];
-    
-    // Program keywords that map to entities
-    const programKeywords = ['aba', 'iba', 'sba', 'gsa', 'asia', 'mena', 'women', 'german', 'tech'];
-    
-    // Extract program entities
-    const programs = keywords.filter(k => programKeywords.includes(k));
-    
-    programs.forEach(program => {
-      const expanded = this.expandAcronym(program);
-      if (expanded !== program) {
-        entities.push(expanded);
-      }
-    });
-    
-    // If we found programs, return them
-    if (entities.length > 0) {
-      return entities;
-    }
-    
-    // Otherwise, try to extract entities from the query
-    // Look for quoted strings or capitalized phrases
-    const quotedMatches = query.match(/"([^"]+)"/g);
-    if (quotedMatches) {
-      quotedMatches.forEach(match => {
-        entities.push(match.replace(/"/g, ''));
-      });
-    }
-    
-    return entities;
-  }
-
-  /**
    * Determine search priority based on intent and cache status
    */
   private determinePriority(
@@ -398,23 +232,5 @@ If the query asks to compare things or find differences, use type "comparison".`
     }
     
     return 'medium';
-  }
-
-  /**
-   * Expand acronym to full name
-   */
-  private expandAcronym(acronym: string): string {
-    const expansions: Record<string, string> = {
-      'aba': 'American Business Awards',
-      'iba': 'International Business Awards',
-      'sba': 'Stevie Awards for Sales & Customer Service',
-      'gsa': 'Stevie Awards for Great Employers',
-      'asia': 'Asia-Pacific Stevie Awards',
-      'mena': 'Middle East & North Africa Stevie Awards',
-      'women': 'Stevie Awards for Women in Business',
-      'german': 'German Stevie Awards',
-      'tech': 'Stevie Awards for Technology Excellence',
-    };
-    return expansions[acronym] || acronym;
   }
 }

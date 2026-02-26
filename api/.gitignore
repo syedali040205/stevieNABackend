@@ -4,3 +4,8 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Crawlee storage (local cache)
+storage/datasets/
+storage/key_value_stores/
+storage/request_queues/

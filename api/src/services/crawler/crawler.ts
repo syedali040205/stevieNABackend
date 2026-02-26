@@ -67,10 +67,10 @@ export class StevieAwardsCrawler {
 
   constructor(config: CrawlerConfig = {}) {
     this.config = {
-      maxRequestsPerCrawl: config.maxRequestsPerCrawl ?? 10,
+      maxRequestsPerCrawl: config.maxRequestsPerCrawl ?? 15,
       maxConcurrency: config.maxConcurrency ?? 2,
       requestDelay: config.requestDelay ?? 1000,
-      maxDepth: config.maxDepth ?? 1,
+      maxDepth: config.maxDepth ?? 2,
       userAgent: config.userAgent ?? 'StevieAwardsSearchBot/1.0 (Award Search Assistant)',
     };
 

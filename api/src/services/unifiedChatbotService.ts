@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../config/supabase';
 import logger from '../utils/logger';
 import { SessionManager } from './sessionManager';
-import { userProfileManager } from './userProfileManager';
+// import { userProfileManager } from './userProfileManager'; // Removed - not pre-populating from profile
 import { recommendationEngine } from './recommendationEngine';
 import { cacheManager } from './cacheManager';
 import { pineconeClient } from './pineconeClient';
@@ -32,32 +32,34 @@ export class UnifiedChatbotService {
     return `${this.KB_CACHE_PREFIX}${hash}`;
   }
 
-  private async requireProfileIfAuthenticated(userId: string): Promise<void> {
-    const profile = await userProfileManager.getProfile(userId);
-    if (!profile) {
-      const err: any = new Error('OnboardingRequired');
-      err.code = 'OnboardingRequired';
-      err.httpStatus = 409;
-      err.details = { missing: 'profile_row' };
-      throw err;
-    }
+  // Note: Profile pre-population removed - we ask for everything fresh in intake flow
+  // Keeping these methods for potential future use
+  // private async requireProfileIfAuthenticated(userId: string): Promise<void> {
+  //   const profile = await userProfileManager.getProfile(userId);
+  //   if (!profile) {
+  //     const err: any = new Error('OnboardingRequired');
+  //     err.code = 'OnboardingRequired';
+  //     err.httpStatus = 409;
+  //     err.details = { missing: 'profile_row' };
+  //     throw err;
+  //   }
 
-    if (!profile.full_name || !profile.country || !profile.organization_name || !profile.email) {
-      const err: any = new Error('OnboardingRequired');
-      err.code = 'OnboardingRequired';
-      err.httpStatus = 409;
-      err.details = { missing: 'required_profile_fields' };
-      throw err;
-    }
-  }
+  //   if (!profile.full_name || !profile.country || !profile.organization_name || !profile.email) {
+  //     const err: any = new Error('OnboardingRequired');
+  //     err.code = 'OnboardingRequired';
+  //     err.httpStatus = 409;
+  //     err.details = { missing: 'required_profile_fields' };
+  //     throw err;
+  //   }
+  // }
 
-  private mapCountryToGeography(country: string): string | null {
-    if (!country) return null;
-    const countryLower = country.toLowerCase().trim();
-    if (countryLower === 'usa' || countryLower === 'united states' || countryLower === 'united states of america') return 'usa';
-    if (countryLower === 'canada') return 'canada';
-    return 'worldwide';
-  }
+  // private mapCountryToGeography(country: string): string | null {
+  //   if (!country) return null;
+  //   const countryLower = country.toLowerCase().trim();
+  //   if (countryLower === 'usa' || countryLower === 'united states' || countryLower === 'united states of america') return 'usa';
+  //   if (countryLower === 'canada') return 'canada';
+  //   return 'worldwide';
+  // }
 
   private persistChatMessagesFireAndForget(params: {
     sessionId: string;
@@ -81,11 +83,11 @@ export class UnifiedChatbotService {
   }
 
   private hasMinimumForRecommendations(ctx: any): boolean {
-    // Require 7 essential fields for recommendations
-    // Optional fields (geography, impact, innovation, challenges) can enhance results but aren't required
+    // Require 8 essential fields for recommendations
     return !!(
       ctx.user_name &&
       ctx.user_email &&
+      ctx.geography &&
       ctx.nomination_subject &&
       ctx.org_type &&
       ctx.gender_programs_opt_in !== undefined &&
@@ -140,25 +142,15 @@ export class UnifiedChatbotService {
         const effectiveUserId = userId || null;
         const expiresAt = new Date(Date.now() + 3600000);
 
-        let initialContext: any = { geography: null, organization_name: null, job_title: null };
-        if (userId) {
-          await this.requireProfileIfAuthenticated(userId);
-          const profile = await userProfileManager.getProfile(userId);
-          if (profile) {
-            initialContext = {
-              geography: this.mapCountryToGeography(profile.country),
-              organization_name: profile.organization_name,
-              job_title: profile.job_title || null,
-            };
-          }
-        }
+        // Start with empty context - we'll ask for everything in the intake flow
+        const initialContext: any = {};
 
         const { data, error } = await this.supabase
           .from('user_sessions')
           .insert({
             id: sessionId,
             user_id: effectiveUserId,
-            session_data: { user_context: initialContext, conversation_history: [], pending_field: null },
+            session_data: { user_context: initialContext, conversation_history: [], pending_field: null, asked_fields: [] },
             conversation_state: 'collecting_org_type',
             expires_at: expiresAt.toISOString(),
           })
@@ -175,6 +167,7 @@ export class UnifiedChatbotService {
       let userContext = session.session_data.user_context;
       const conversationHistory = session.session_data.conversation_history || [];
       let pendingField = (session.session_data as any).pending_field as IntakeField | null | undefined;
+      let askedFields = new Set<string>((session.session_data as any).asked_fields || []);
 
       logger.info('step_1_classifying_context');
       const context = await contextClassifier.classifyContext({
@@ -288,7 +281,7 @@ export class UnifiedChatbotService {
 
         await this.sessionManager.updateSession(
           sessionId,
-          { user_context: userContext, conversation_history: updatedHistory, pending_field: pendingField ?? null },
+          { user_context: userContext, conversation_history: updatedHistory, pending_field: pendingField ?? null, asked_fields: Array.from(askedFields) },
           session.conversation_state as any
         );
 
@@ -326,7 +319,7 @@ export class UnifiedChatbotService {
 
         await this.sessionManager.updateSession(
           sessionId,
-          { user_context: userContext, conversation_history: updatedHistory, pending_field: null },
+          { user_context: userContext, conversation_history: updatedHistory, pending_field: null, asked_fields: Array.from(askedFields) },
           session.conversation_state as any
         );
 
@@ -354,7 +347,12 @@ export class UnifiedChatbotService {
         logger.info('no_pending_field_to_apply', { message_preview: message.substring(0, 50) });
       }
 
-      const plan = await intakeAssistant.planNext({ userContext, message, signal });
+      const plan = await intakeAssistant.planNext({ 
+        userContext, 
+        message, 
+        askedFields, 
+        signal 
+      } as any);
 
       // Log what the LLM extracted
       logger.info('intake_assistant_plan_result', {
@@ -369,25 +367,41 @@ export class UnifiedChatbotService {
         userContext = { ...userContext, ...plan.updates };
       }
 
+      // Count how many optional follow-ups have been collected
+      const optionalFollowUps = ['achievement_impact', 'achievement_innovation', 'achievement_challenges'];
+      const collectedOptionals = optionalFollowUps.filter(field => (userContext as any)[field]).length;
+
       // Safeguard: don't let the model jump past basic identity fields if they're still missing.
       const missingBasics: IntakeField[] = [];
-      if (!userContext.user_name) missingBasics.push('user_name');
-      if (!userContext.user_email) missingBasics.push('user_email');
-      if (!userContext.nomination_subject) missingBasics.push('nomination_subject');
-      if (!userContext.org_type) missingBasics.push('org_type');
-      if (userContext.gender_programs_opt_in === undefined) missingBasics.push('gender_programs_opt_in');
-      if (!userContext.recognition_scope) missingBasics.push('recognition_scope');
-      if (!userContext.description) missingBasics.push('description');
+      if (!userContext.user_name && !askedFields.has('user_name')) missingBasics.push('user_name');
+      if (!userContext.user_email && !askedFields.has('user_email')) missingBasics.push('user_email');
+      if (!userContext.geography && !askedFields.has('geography')) missingBasics.push('geography');
+      if (!userContext.nomination_subject && !askedFields.has('nomination_subject')) missingBasics.push('nomination_subject');
+      if (!userContext.org_type && !askedFields.has('org_type')) missingBasics.push('org_type');
+      if (userContext.gender_programs_opt_in === undefined && !askedFields.has('gender_programs_opt_in')) missingBasics.push('gender_programs_opt_in');
+      if (!userContext.recognition_scope && !askedFields.has('recognition_scope')) missingBasics.push('recognition_scope');
+      if (!userContext.description && !askedFields.has('description')) missingBasics.push('description');
 
       let assistantText = plan.next_question;
       let effectiveNextField: IntakeField | null = plan.next_field;
+      let forceReady = false;
 
-      if (missingBasics.length > 0 && plan.ready_for_recommendations !== true) {
+      // Force ready state if we have all required fields + 2 optional follow-ups
+      if (missingBasics.length === 0 && collectedOptionals >= 2) {
+        effectiveNextField = null;
+        assistantText = "Perfect! Let me find the best categories for you.";
+        forceReady = true;
+        logger.info('intake_forced_ready_state', {
+          collected_optionals: collectedOptionals,
+          model_next_field: plan.next_field
+        });
+      } else if (missingBasics.length > 0 && plan.ready_for_recommendations !== true) {
         const forced = missingBasics[0];
         if (effectiveNextField !== forced) {
           effectiveNextField = forced;
           if (forced === 'user_name') assistantText = "What's your name?";
           else if (forced === 'user_email') assistantText = 'And your email?';
+          else if (forced === 'geography') assistantText = 'Where are you from?';
           else if (forced === 'nomination_subject') {
             assistantText = 'Are we nominating an individual, team, organization, or product?';
           }
@@ -424,23 +438,34 @@ export class UnifiedChatbotService {
 
       pendingField = plan.ready_for_recommendations ? null : effectiveNextField;
 
+      // Track that we've asked this field
+      if (effectiveNextField) {
+        askedFields.add(effectiveNextField);
+      }
+
       logger.info('updating_session_with_context', {
         session_id: sessionId,
         user_context_keys: Object.keys(userContext),
         user_name: userContext.user_name ? 'SET' : 'NOT_SET',
         user_email: userContext.user_email ? 'SET' : 'NOT_SET',
-        pending_field: pendingField
+        pending_field: pendingField,
+        asked_fields_count: askedFields.size
       });
 
       await this.sessionManager.updateSession(
         sessionId,
-        { user_context: userContext, conversation_history: updatedHistory, pending_field: pendingField ?? null },
+        { 
+          user_context: userContext, 
+          conversation_history: updatedHistory, 
+          pending_field: pendingField ?? null,
+          asked_fields: Array.from(askedFields)
+        },
         session.conversation_state as any
       );
 
       this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: assistantText });
 
-      if (plan.ready_for_recommendations && this.hasMinimumForRecommendations(userContext)) {
+      if ((plan.ready_for_recommendations || forceReady) && this.hasMinimumForRecommendations(userContext)) {
         yield { type: 'status', message: 'Generating personalized category recommendations...' };
 
         // Map recognition_scope to geography using database configuration
