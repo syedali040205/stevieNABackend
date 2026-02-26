@@ -12,7 +12,7 @@ import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
 import { intakeAssistant } from './intakeAssistant';
 import { applyAnswer, type IntakeField } from './intakeFlow';
-import { langchainAgent } from './langchainAgent';
+import { qaAgent } from './qaAgent';
 
 export class UnifiedChatbotService {
   private supabase = getSupabaseClient();
@@ -191,18 +191,17 @@ export class UnifiedChatbotService {
         let assistantResponse = '';
         
         try {
-          // LangChain agent decides which tool to use
-          const agentResult = await langchainAgent.query(message, conversationHistory);
-          assistantResponse = agentResult.answer;
+          // QA agent with function calling decides which tool to use
+          const agentResult = await qaAgent.query(message, conversationHistory);
+          assistantResponse = agentResult;
           
-          logger.info('qa_langchain_agent_success', {
+          logger.info('qa_agent_success', {
             response_length: assistantResponse.length,
-            sources_count: agentResult.sources.length,
           });
 
           yield { type: 'chunk', content: assistantResponse };
         } catch (error: any) {
-          logger.error('qa_langchain_agent_error', { error: error.message });
+          logger.error('qa_agent_error', { error: error.message });
           
           // Fallback to simple KB search if agent fails
           const kbArticles = await this.searchKB(message, signal);

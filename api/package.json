@@ -8,19 +8,11 @@
     "build": "tsc --build tsconfig.json",
     "start": "node dist/index.js",
     "test": "jest --passWithNoTests",
-    "lint": "eslint src --ext .ts",
-    "chunk-kb": "tsx ../scripts/chunk-kb-content.ts",
-    "ingest-kb": "tsx --env-file=.env ingest-kb-data.ts",
-    "test-kb-search": "tsx --env-file=.env test-kb-search.ts",
-    "cleanup-sessions": "node scripts/run-session-cleanup.js",
-    "test-redis": "node scripts/test-redis.js"
+    "lint": "eslint src --ext .ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.985.0",
     "@aws-sdk/s3-request-presigner": "^3.985.0",
-    "@langchain/core": "^1.1.28",
-    "@langchain/langgraph": "^1.1.5",
-    "@langchain/openai": "^1.2.10",
     "@pinecone-database/pinecone": "^7.0.0",
     "@supabase/supabase-js": "^2.39.0",
     "@types/compression": "^1.8.1",

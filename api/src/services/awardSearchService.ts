@@ -1,6 +1,5 @@
 import { QueryPlanner } from './crawler/queryPlanner';
 import { jinaReader, JinaReaderResult } from './crawler/jinaReader';
-import { AnswerSynthesizer } from './crawler/synthesizer';
 import { CitationSystem } from './citationSystem';
 import { awardSearchCacheManager } from './awardSearchCacheManager';
 import { openaiService } from './openaiService';
@@ -45,14 +44,11 @@ export class AwardSearchService {
   private queue: QueuedRequest[] = [];
   private processing = false;
   private queryPlanner: QueryPlanner;
-  private crawler: StevieAwardsCrawler;
-  private synthesizer: AnswerSynthesizer;
   private citationSystem: CitationSystem;
   private config = getAwardSearchConfig();
 
   constructor() {
     this.queryPlanner = new QueryPlanner();
-    this.synthesizer = new AnswerSynthesizer(openaiService);
     this.citationSystem = new CitationSystem();
   }
 
@@ -192,8 +188,10 @@ export class AwardSearchService {
       const allResults = [...Object.values(cachedResults), ...crawlResults];
       cacheHit = missingUrls.length === 0 && cachedUrls.length > 0;
       if (allResults.length === 0) throw new Error('No results found for query');
-      const synthesized = await this.synthesizer.synthesize(query, allResults);
-      const cited = await this.citationSystem.addCitations(synthesized.answer, allResults);
+      
+      // Synthesize answer using OpenAI directly
+      const synthesized = await this.synthesizeAnswer(query, allResults);
+      const cited = await this.citationSystem.addCitations(synthesized, allResults);
       const responseTime = Date.now() - startTime;
       awardSearchRequestsTotal.inc({ status: 'success', cache_hit: cacheHit ? 'true' : 'false' });
       awardSearchResponseTime.observe({ cache_hit: cacheHit ? 'true' : 'false' }, responseTime / 1000);
@@ -226,6 +224,35 @@ export class AwardSearchService {
       logger.error('award_search_health_check_failed', { error });
       return false;
     }
+  }
+
+  /**
+   * Synthesize answer from crawled results using OpenAI
+   */
+  private async synthesizeAnswer(query: string, results: any[]): Promise<string> {
+    const context = results
+      .map((r, i) => `[Source ${i + 1}]: ${r.content.substring(0, 1500)}`)
+      .join('\n\n');
+
+    const prompt = `Based on the following information, answer the user's question about Stevie Awards.
+
+Question: ${query}
+
+Context:
+${context}
+
+Provide a clear, accurate answer based on the context above. If the context doesn't contain enough information, say so.`;
+
+    const response = await openaiService.chatCompletion({
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant for Stevie Awards information.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3,
+      maxTokens: 1500,
+    });
+
+    return response;
   }
 }
 

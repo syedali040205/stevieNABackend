@@ -71,7 +71,7 @@ class OpenAIRequestQueue {
     if (result === undefined) {
       throw new Error('Queue returned undefined result');
     }
-    return result;
+    return result as T;
   }
 
   /**
