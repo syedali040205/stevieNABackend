@@ -7,7 +7,7 @@ services:
     plan: starter
     # Increase memory limit for crawler
     autoDeploy: true
-    buildCommand: rm -rf ../crawler 2>/dev/null || true && cd api && npm install && npm run build
+    buildCommand: rm -rf ../crawler 2>/dev/null || true && cd api && NODE_OPTIONS="--max-old-space-size=4096" npm install && npm run build
     startCommand: cd api && npm start
     healthCheckPath: /api/health
     envVars:
