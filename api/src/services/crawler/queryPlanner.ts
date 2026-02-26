@@ -73,13 +73,24 @@ export class QueryPlanner {
 
   /**
    * Analyze query intent using OpenAI
-   * Detects query type and decomposes multi-part questions
+   * Detects query type, award programs, and decomposes multi-part questions
    */
   private async analyzeIntent(query: string): Promise<QueryIntent> {
     const systemPrompt = `You are an expert at analyzing questions about Stevie Awards. 
 Analyze the user's query and determine:
 1. The primary intent type: category, eligibility, pricing, deadline, process, comparison, or general
 2. If the query contains multiple sub-questions, list them separately
+
+Known Stevie Awards programs:
+- American Business Awards (ABA)
+- International Business Awards (IBA)
+- Stevie Awards for Sales & Customer Service
+- Stevie Awards for Great Employers
+- Asia-Pacific Stevie Awards
+- Middle East & North Africa Stevie Awards (MENA)
+- Stevie Awards for Women in Business (SAWIB, WIB)
+- German Stevie Awards
+- Stevie Awards for Technology Excellence
 
 Respond in JSON format:
 {
@@ -165,12 +176,22 @@ If the query asks to compare things or find differences, use type "comparison".`
     const normalized = query.toLowerCase();
     const keywords: string[] = [];
 
-    // Extract award program names
-    const programs = ['aba', 'iba', 'sba', 'gsa', 'asia', 'mena'];
-    programs.forEach(program => {
-      if (normalized.includes(program) || 
-          normalized.includes(this.expandAcronym(program))) {
-        keywords.push(program);
+    // Award program patterns - more flexible matching
+    const programPatterns = [
+      { pattern: /\b(aba|american business)\b/i, keyword: 'aba' },
+      { pattern: /\b(iba|international business)\b/i, keyword: 'iba' },
+      { pattern: /\b(sales|customer service|sba)\b/i, keyword: 'sba' },
+      { pattern: /\b(great employers|gsa)\b/i, keyword: 'gsa' },
+      { pattern: /\b(asia|apac|asia-pacific)\b/i, keyword: 'asia' },
+      { pattern: /\b(mena|middle east|north africa)\b/i, keyword: 'mena' },
+      { pattern: /\b(women|wib|sawib|women in business)\b/i, keyword: 'women' },
+      { pattern: /\b(german|germany)\b/i, keyword: 'german' },
+      { pattern: /\b(tech|technology)\b/i, keyword: 'tech' },
+    ];
+
+    programPatterns.forEach(({ pattern, keyword }) => {
+      if (pattern.test(query)) {
+        keywords.push(keyword);
       }
     });
 
@@ -182,7 +203,7 @@ If the query asks to compare things or find differences, use type "comparison".`
       'deadline', 'due date', 'submission',
       'nomination', 'nominate', 'entry', 'enter',
       'process', 'procedure', 'how to',
-      'award', 'awards', 'winner', 'winners'
+      'award', 'awards', 'winner', 'winners', 'held', 'location', 'venue'
     ];
     
     topics.forEach(topic => {
@@ -203,10 +224,21 @@ If the query asks to compare things or find differences, use type "comparison".`
     const urls: string[] = [];
     const baseUrl = 'https://www.stevieawards.com';
 
+    // Map program keywords to URL paths
+    const programUrlMap: Record<string, string> = {
+      'aba': 'aba',
+      'iba': 'iba',
+      'sba': 'sba',
+      'gsa': 'gsa',
+      'asia': 'asia',
+      'mena': 'mena',
+      'women': 'women',
+      'german': 'german',
+      'tech': 'tech'
+    };
+
     // Extract program keywords
-    const programs = keywords.filter(k => 
-      ['aba', 'iba', 'sba', 'gsa', 'asia', 'mena'].includes(k)
-    );
+    const programs = keywords.filter(k => k in programUrlMap);
 
     // If no specific program mentioned, add main site
     if (programs.length === 0) {
@@ -215,7 +247,7 @@ If the query asks to compare things or find differences, use type "comparison".`
 
     // Generate URLs based on intent type
     programs.forEach(program => {
-      const programPath = `${baseUrl}/${program}`;
+      const programPath = `${baseUrl}/${programUrlMap[program]}`;
       
       switch (intent.type) {
         case 'category':
@@ -312,13 +344,17 @@ If the query asks to compare things or find differences, use type "comparison".`
   private extractEntities(query: string, keywords: string[]): string[] {
     const entities: string[] = [];
     
+    // Program keywords that map to entities
+    const programKeywords = ['aba', 'iba', 'sba', 'gsa', 'asia', 'mena', 'women', 'german', 'tech'];
+    
     // Extract program entities
-    const programs = keywords.filter(k => 
-      ['aba', 'iba', 'sba', 'gsa', 'asia', 'mena'].includes(k)
-    );
+    const programs = keywords.filter(k => programKeywords.includes(k));
     
     programs.forEach(program => {
-      entities.push(this.expandAcronym(program));
+      const expanded = this.expandAcronym(program);
+      if (expanded !== program) {
+        entities.push(expanded);
+      }
     });
     
     // If we found programs, return them
@@ -375,6 +411,9 @@ If the query asks to compare things or find differences, use type "comparison".`
       'gsa': 'Stevie Awards for Great Employers',
       'asia': 'Asia-Pacific Stevie Awards',
       'mena': 'Middle East & North Africa Stevie Awards',
+      'women': 'Stevie Awards for Women in Business',
+      'german': 'German Stevie Awards',
+      'tech': 'Stevie Awards for Technology Excellence',
     };
     return expansions[acronym] || acronym;
   }
