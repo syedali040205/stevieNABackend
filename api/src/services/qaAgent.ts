@@ -83,6 +83,13 @@ CORE RESPONSIBILITIES:
 2. Help users find relevant information using available tools
 3. Guide users toward finding the right award categories for their achievements
 
+CRITICAL: ANSWER ACCURACY
+- ONLY use information that DIRECTLY answers the user's specific question
+- If the user asks about "SAWIB 25", do NOT provide information about MENA, SATE, or other events
+- If the user asks about "MENA 25", do NOT provide information about SAWIB, SATE, or other events
+- Pay close attention to event names, years, and specific details in the query
+- If you find information about multiple events, ONLY use the one that matches the query
+
 TOOL USAGE GUIDELINES:
 - Use "search_knowledge_base" for general information about categories, eligibility, processes
 - Use "search_stevie_website" for specific event details (locations, dates, judging criteria, how to enter)
@@ -291,16 +298,18 @@ export class QAAgent {
       const urlsToScrape = searchResults.results.slice(0, 3).map(r => r.url);
       const scrapedResults = await jinaReader.scrapeMultiple(urlsToScrape);
 
+      // Filter and format results - include URL in content for better context
       const formattedResults = scrapedResults.map(result => ({
         title: result.title,
         url: result.url,
-        content: result.content.substring(0, 2000),
+        content: `[Source: ${result.url}]\n${result.content.substring(0, 2000)}`,
       }));
 
       return JSON.stringify({
         success: true,
         results: formattedResults,
         answer: searchResults.answer,
+        note: 'IMPORTANT: Only use information that directly answers the user query. Ignore information about other events or programs.',
       });
     } catch (error: any) {
       logger.error('search_stevie_website_error', { error: error.message });
