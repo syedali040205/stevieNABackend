@@ -89,23 +89,36 @@ Known Stevie Awards programs and their base URLs:
 
 Main site: https://www.stevieawards.com
 
+IMPORTANT: For location/venue queries (where was X held), suggest URLs that likely contain event details:
+- Program winners pages often have event information: /aba/winners, /mena/winners, /women/winners
+- News/press pages: /news, /press
+- Main program page as fallback
+
 Your task:
-1. Identify the intent type: category, eligibility, pricing, deadline, process, comparison, or general
+1. Identify the intent type: category, eligibility, pricing, deadline, process, comparison, location, or general
 2. Detect which Stevie Awards program(s) the user is asking about
 3. Suggest 1-2 STARTING URLs where the crawler should begin
    - The crawler will automatically discover and follow relevant links from these pages
    - Choose pages that are likely to have links to the information needed
+   - For LOCATION queries: suggest winners/news pages where event details are typically found
    - For program-specific questions, suggest the main program page
    - For general questions, suggest the main site
 4. Break down multi-part questions into sub-questions
 
 Respond in JSON format:
 {
-  "type": "category|eligibility|pricing|deadline|process|comparison|general",
+  "type": "category|eligibility|pricing|deadline|process|comparison|location|general",
   "subQuestions": ["question 1", "question 2", ...],
   "detectedPrograms": ["program name 1", "program name 2", ...],
   "suggestedUrls": ["starting_url1", "starting_url2"]
-}`;
+}
+
+EXAMPLES:
+Query: "where was ABA 2025 held?"
+Response: {"type": "location", "subQuestions": ["where was ABA 2025 held?"], "detectedPrograms": ["American Business Awards"], "suggestedUrls": ["https://www.stevieawards.com/aba", "https://www.stevieawards.com/news"]}
+
+Query: "what is the deadline for MENA 2026?"
+Response: {"type": "deadline", "subQuestions": ["what is the deadline for MENA 2026?"], "detectedPrograms": ["Middle East & North Africa Stevie Awards"], "suggestedUrls": ["https://www.stevieawards.com/mena"]}`;
 
     const userPrompt = `Analyze this query and suggest 1-2 starting URLs for crawling: "${query}"`;
 

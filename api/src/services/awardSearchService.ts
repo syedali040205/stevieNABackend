@@ -1,5 +1,5 @@
 import { QueryPlanner } from './crawler/queryPlanner';
-import { StevieAwardsCrawler, CrawlResult } from './crawler/crawler';
+import { jinaReader, JinaReaderResult } from './crawler/jinaReader';
 import { AnswerSynthesizer } from './crawler/synthesizer';
 import { CitationSystem } from './citationSystem';
 import { awardSearchCacheManager } from './awardSearchCacheManager';
@@ -52,7 +52,6 @@ export class AwardSearchService {
 
   constructor() {
     this.queryPlanner = new QueryPlanner();
-    this.crawler = new StevieAwardsCrawler();
     this.synthesizer = new AnswerSynthesizer(openaiService);
     this.citationSystem = new CitationSystem();
   }
@@ -139,23 +138,58 @@ export class AwardSearchService {
       if (cachedUrls.length > 0) {
         logger.info('award_search_cache_hit', { cachedCount: cachedUrls.length, missingCount: missingUrls.length });
       }
-      const crawlResults: CrawlResult[] = [];
+      // Scrape missing URLs using Jina AI Reader
+      const jinaResults: JinaReaderResult[] = [];
       if (missingUrls.length > 0) {
-        logger.info('award_search_crawling', { urlCount: missingUrls.length });
+        logger.info('award_search_scraping_jina', { urlCount: missingUrls.length });
         try {
           awardSearchCrawlRequests.inc({ status: 'started' });
-          const results = await this.crawler.crawl(missingUrls);
-          crawlResults.push(...results);
+          
+          // Use Jina AI to scrape URLs (much faster and cleaner than Crawlee)
+          const results = await jinaReader.scrapeMultiple(missingUrls);
+          jinaResults.push(...results);
+          
           awardSearchCrawlRequests.inc({ status: 'success' });
+          
+          // Cache the results (convert Jina format to CrawlResult format)
           for (const result of results) {
-            await awardSearchCacheManager.set(result.url, result);
+            const crawlResult = {
+              url: result.url,
+              title: result.title,
+              content: result.content, // Already clean markdown!
+              headings: [], // Not needed with markdown
+              tables: [], // Not needed with markdown
+              entities: [],
+              metadata: {
+                crawledAt: result.metadata.crawledAt,
+                contentType: 'text/markdown',
+                depth: 0,
+              },
+            };
+            await awardSearchCacheManager.set(result.url, crawlResult);
           }
         } catch (error: any) {
           awardSearchCrawlRequests.inc({ status: 'error' });
-          logger.warn('award_search_crawl_failed', { error: error.message });
+          logger.warn('award_search_jina_failed', { error: error.message });
         }
       }
-      const allResults: CrawlResult[] = [...Object.values(cachedResults), ...crawlResults];
+      
+      // Convert Jina results to CrawlResult format for synthesizer
+      const crawlResults = jinaResults.map(r => ({
+        url: r.url,
+        title: r.title,
+        content: r.content,
+        headings: [],
+        tables: [],
+        entities: [],
+        metadata: {
+          crawledAt: r.metadata.crawledAt,
+          contentType: 'text/markdown',
+          depth: 0,
+        },
+      }));
+      
+      const allResults = [...Object.values(cachedResults), ...crawlResults];
       cacheHit = missingUrls.length === 0 && cachedUrls.length > 0;
       if (allResults.length === 0) throw new Error('No results found for query');
       const synthesized = await this.synthesizer.synthesize(query, allResults);

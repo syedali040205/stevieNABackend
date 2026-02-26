@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../config/supabase';
 import logger from '../utils/logger';
 import { SessionManager } from './sessionManager';
+import { createHash } from 'crypto';
 // import { userProfileManager } from './userProfileManager'; // Removed - not pre-populating from profile
 import { recommendationEngine } from './recommendationEngine';
 import { cacheManager } from './cacheManager';
@@ -11,8 +12,7 @@ import { conversationManager } from './conversationManager';
 import { fieldExtractor } from './fieldExtractor';
 import { intakeAssistant } from './intakeAssistant';
 import { applyAnswer, type IntakeField } from './intakeFlow';
-import { awardSearchService } from './awardSearchService';
-import crypto from 'crypto';
+import { langchainAgent } from './langchainAgent';
 
 export class UnifiedChatbotService {
   private supabase = getSupabaseClient();
@@ -28,7 +28,7 @@ export class UnifiedChatbotService {
       .replace(/\s+/g, ' ')
       .replace(/[^\w\s]/g, '');
 
-    const hash = crypto.createHash('md5').update(normalized).digest('hex');
+    const hash = createHash('md5').update(normalized).digest('hex');
     return `${this.KB_CACHE_PREFIX}${hash}`;
   }
 
@@ -184,80 +184,29 @@ export class UnifiedChatbotService {
         const extractedFields = await fieldExtractor.extractFields({ message, userContext, conversationHistory, signal });
         if (extractedFields && Object.keys(extractedFields).length > 0) userContext = { ...userContext, ...extractedFields };
 
-        // First, try KB search
-        const kbArticles = await this.searchKB(message, signal);
-
-        // Check if KB articles are sufficient (have good similarity scores)
-        const hasGoodKBResults = kbArticles.length > 0 && kbArticles[0].similarity > 0.7;
+        // Use LangChain agent with tool calling
+        // The LLM will decide whether to use KB search or web crawler
+        logger.info('qa_using_langchain_agent', { message: message.substring(0, 100) });
 
         let assistantResponse = '';
-        let usedAwardSearch = false;
-
-        if (!hasGoodKBResults) {
-          // KB didn't have good results, try Award Search crawler
-          logger.info('qa_fallback_to_award_search', { 
-            message: message.substring(0, 100),
-            kb_results: kbArticles.length,
-            top_similarity: kbArticles[0]?.similarity || 0
+        
+        try {
+          // LangChain agent decides which tool to use
+          const agentResult = await langchainAgent.query(message, conversationHistory);
+          assistantResponse = agentResult.answer;
+          
+          logger.info('qa_langchain_agent_success', {
+            response_length: assistantResponse.length,
+            sources_count: agentResult.sources.length,
           });
 
-          try {
-            const awardSearchResult = await awardSearchService.search(message);
-            
-            if (awardSearchResult.success) {
-              // Use the crawler's answer
-              assistantResponse = awardSearchResult.answer;
-              usedAwardSearch = true;
-              
-              logger.info('qa_award_search_success', {
-                cache_hit: awardSearchResult.metadata.cacheHit,
-                response_time: awardSearchResult.metadata.responseTimeMs,
-                sources_used: awardSearchResult.metadata.sourcesUsed
-              });
-
-              yield { type: 'chunk', content: assistantResponse };
-            } else {
-              // Award search failed, fall back to KB with warning
-              logger.warn('qa_award_search_failed', { 
-                error: awardSearchResult.error?.message 
-              });
-              
-              // Generate response from KB articles even if similarity is low
-              for await (const chunk of conversationManager.generateResponseStream({
-                message,
-                context,
-                conversationHistory,
-                userContext,
-                kbArticles,
-                signal,
-              })) {
-                assistantResponse += chunk;
-                yield { type: 'chunk', content: chunk };
-              }
-            }
-          } catch (error: any) {
-            // Award search threw an error, fall back to KB
-            logger.error('qa_award_search_error', { error: error.message });
-            
-            for await (const chunk of conversationManager.generateResponseStream({
-              message,
-              context,
-              conversationHistory,
-              userContext,
-              kbArticles,
-              signal,
-            })) {
-              assistantResponse += chunk;
-              yield { type: 'chunk', content: chunk };
-            }
-          }
-        } else {
-          // KB has good results, use them
-          logger.info('qa_using_kb_articles', { 
-            kb_results: kbArticles.length,
-            top_similarity: kbArticles[0]?.similarity 
-          });
-
+          yield { type: 'chunk', content: assistantResponse };
+        } catch (error: any) {
+          logger.error('qa_langchain_agent_error', { error: error.message });
+          
+          // Fallback to simple KB search if agent fails
+          const kbArticles = await this.searchKB(message, signal);
+          
           for await (const chunk of conversationManager.generateResponseStream({
             message,
             context,
@@ -288,8 +237,7 @@ export class UnifiedChatbotService {
         this.persistChatMessagesFireAndForget({ sessionId, userMessage: message, assistantMessage: assistantResponse || '(No response)' });
         
         logger.info('unified_chat_complete', { 
-          used_award_search: usedAwardSearch,
-          kb_results: kbArticles.length 
+          used_langchain_agent: true
         });
         return;
       }
