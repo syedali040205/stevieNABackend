@@ -1,4 +1,4 @@
-import type { CrawlResult } from './crawler/crawler';
+import type { JinaReaderResult } from './crawler/jinaReader';
 
 /**
  * Citation information for a source
@@ -37,10 +37,10 @@ export class CitationSystem {
    * Only cites the most prominent source
    * 
    * @param answer - The generated answer text
-   * @param sources - Array of crawl results used to generate the answer
+   * @param sources - Array of Jina AI results used to generate the answer
    * @returns CitedAnswer with inline citations and footnotes
    */
-  async addCitations(answer: string, sources: CrawlResult[]): Promise<CitedAnswer> {
+  async addCitations(answer: string, sources: JinaReaderResult[]): Promise<CitedAnswer> {
     if (sources.length === 0) {
       return {
         answer,
