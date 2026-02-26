@@ -2,7 +2,6 @@
  * Web Search Service
  * 
  * Provides real web search capabilities using Tavily API (free tier: 1000 searches/month)
- * Falls back to DuckDuckGo if Tavily is not configured
  * 
  * This solves the problem of only scraping known URLs - now we can actually
  * search the web to find relevant pages first, then scrape them.
@@ -31,7 +30,6 @@ class WebSearchService {
 
   /**
    * Search the web using Tavily API
-   * Falls back to DuckDuckGo HTML scraping if Tavily is not configured
    */
   async search(query: string, options: {
     maxResults?: number;
@@ -47,14 +45,10 @@ class WebSearchService {
     logger.info('web_search_start', { query, maxResults, searchDepth });
 
     try {
-      if (this.TAVILY_API_KEY) {
-        return await this.searchWithTavily(query, maxResults, includeAnswer, searchDepth);
-      } else {
-        logger.warn('web_search_tavily_not_configured', { 
-          message: 'TAVILY_API_KEY not set, falling back to DuckDuckGo' 
-        });
-        return await this.searchWithDuckDuckGo(query, maxResults);
+      if (!this.TAVILY_API_KEY) {
+        throw new Error('TAVILY_API_KEY not configured');
       }
+      return await this.searchWithTavily(query, maxResults, includeAnswer, searchDepth);
     } catch (error: any) {
       logger.error('web_search_error', { 
         query, 
@@ -65,7 +59,7 @@ class WebSearchService {
   }
 
   /**
-   * Search using Tavily API (recommended - AI-optimized search)
+   * Search using Tavily API (AI-optimized search)
    */
   private async searchWithTavily(
     query: string,
@@ -117,61 +111,6 @@ class WebSearchService {
         status: error.response?.status,
       });
       throw new Error(`Tavily search failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Fallback: Search using DuckDuckGo HTML scraping
-   * This is free but less reliable than Tavily
-   */
-  private async searchWithDuckDuckGo(
-    query: string,
-    maxResults: number
-  ): Promise<WebSearchResponse> {
-    try {
-      // Use DuckDuckGo's HTML search (no API key needed)
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      
-      // Use Jina AI to scrape DuckDuckGo results page
-      const scrapedContent = await jinaReader.scrape(searchUrl);
-      
-      // Parse results from the scraped content
-      // This is a simple regex-based parser - not perfect but works
-      const results: WebSearchResult[] = [];
-      const urlRegex = /\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g;
-      let match;
-      let count = 0;
-
-      while ((match = urlRegex.exec(scrapedContent.content)) !== null && count < maxResults) {
-        const title = match[1];
-        const url = match[2];
-        
-        // Skip DuckDuckGo's own URLs
-        if (url.includes('duckduckgo.com')) continue;
-        
-        results.push({
-          title,
-          url,
-          snippet: '', // DuckDuckGo HTML doesn't provide snippets easily
-        });
-        count++;
-      }
-
-      logger.info('web_search_duckduckgo_success', {
-        query,
-        resultsCount: results.length,
-      });
-
-      return {
-        query,
-        results,
-      };
-    } catch (error: any) {
-      logger.error('web_search_duckduckgo_error', {
-        query,
-        error: error.message,
-      });
-      throw new Error(`DuckDuckGo search failed: ${error.message}`);
     }
   }
 
